@@ -207,9 +207,15 @@
                 <!-- Actions -->
                 <div class="actions">
                     <div class="actions-left">
-                        <select id="chamilo-course-select">
-                            <option value="">Выберите курс Chamilo...</option>
-                        </select>
+                        <div class="course-select-group">
+                            <select id="chamilo-course-select" onchange="onCourseSelect()">
+                                <option value="">Загрузка курсов...</option>
+                            </select>
+                            <input type="text" id="chamilo-course-manual" placeholder="или введите код курса"
+                                class="course-manual-input">
+                            <button class="btn btn-sm btn-refresh" onclick="loadChamiloCourses()"
+                                title="Обновить список">🔄</button>
+                        </div>
                     </div>
                     <div class="actions-right">
                         <button class="btn btn-secondary" onclick="downloadSCORM()" id="btn-download">

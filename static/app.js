@@ -241,6 +241,9 @@ function renderPreview(course) {
     const section = document.getElementById('preview-section');
     section.style.display = '';
 
+    // Auto-load Chamilo courses
+    loadChamiloCourses();
+
     // Header
     const pages = course.pages || [];
     const totalBlocks = pages.reduce((s, p) => s + (p.blocks || []).length, 0);
@@ -307,9 +310,12 @@ function downloadSCORM() {
 }
 
 async function uploadToChamilo() {
-    const courseCode = document.getElementById('chamilo-course-select').value;
+    const selectVal = document.getElementById('chamilo-course-select').value;
+    const manualVal = document.getElementById('chamilo-course-manual').value.trim();
+    const courseCode = manualVal || selectVal;
+
     if (!courseCode) {
-        showMsg('action-msg', '⚠️ Выберите курс Chamilo', 'fail');
+        showMsg('action-msg', '⚠️ Выберите курс из списка или введите код курса вручную', 'fail');
         return;
     }
 
@@ -358,6 +364,13 @@ function switchTab(tab) {
     document.getElementById('tab-json').classList.toggle('active', tab === 'json');
     document.getElementById('form-ai').style.display = tab === 'ai' ? '' : 'none';
     document.getElementById('form-json').style.display = tab === 'json' ? '' : 'none';
+}
+
+function onCourseSelect() {
+    const val = document.getElementById('chamilo-course-select').value;
+    if (val) {
+        document.getElementById('chamilo-course-manual').value = '';
+    }
 }
 
 function setStatus(id, status) {

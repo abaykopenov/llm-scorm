@@ -104,9 +104,12 @@ def save_settings():
 def test_chamilo():
     """Test Chamilo LMS connection and login."""
     data = request.json
-    url = data.get("url", "").rstrip("/")
-    user = data.get("user", "admin")
-    password = data.get("password", "")
+    import config
+    from importlib import reload
+    reload(config)
+    url = (data.get("url", "") or config.CHAMILO_URL).rstrip("/")
+    user = data.get("user", "") or config.CHAMILO_USER or "admin"
+    password = data.get("password", "") or config.CHAMILO_PASSWORD
 
     if not url:
         return jsonify({"ok": False, "error": "URL не указан"})
@@ -193,10 +196,14 @@ def test_llm():
 @app.route("/api/chamilo-courses", methods=["POST"])
 def chamilo_courses():
     """Get list of courses from Chamilo."""
+    import config
+    from importlib import reload
+    reload(config)
+
     data = request.json
-    url = data.get("url", "").rstrip("/")
-    user = data.get("user", "admin")
-    password = data.get("password", "")
+    url = (data.get("url", "") or config.CHAMILO_URL).rstrip("/")
+    user = data.get("user", "") or config.CHAMILO_USER or "admin"
+    password = data.get("password", "") or config.CHAMILO_PASSWORD
 
     if not url:
         return jsonify({"ok": False, "courses": []})
@@ -317,6 +324,10 @@ def build_scorm():
 @app.route("/api/upload", methods=["POST"])
 def upload_to_chamilo():
     """Upload SCORM to Chamilo."""
+    import config
+    from importlib import reload
+    reload(config)
+
     data = request.json
     scorm_path = _state.get("last_scorm_path")
     if not scorm_path:
@@ -327,9 +338,9 @@ def upload_to_chamilo():
     try:
         from chamilo_uploader import ChamiloUploader
         uploader = ChamiloUploader(
-            chamilo_url=data.get("chamilo_url"),
-            username=data.get("chamilo_user"),
-            password=data.get("chamilo_password"),
+            chamilo_url=data.get("chamilo_url") or config.CHAMILO_URL,
+            username=data.get("chamilo_user") or config.CHAMILO_USER,
+            password=data.get("chamilo_password") or config.CHAMILO_PASSWORD,
         )
         success = uploader.upload(scorm_path, course_code or None)
         if success:
