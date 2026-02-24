@@ -64,13 +64,27 @@ class LLMCourseGenerator:
     # ------------------------------------------------------------------
 
     def generate_course(self, topic: str, num_pages: int | None = None,
-                        language: str | None = None) -> dict:
+                        language: str | None = None,
+                        temperature: float | None = None,
+                        max_tokens: int | None = None,
+                        blocks_per_page: int = 3,
+                        questions_per_page: int = 1,
+                        detail_level: str = "normal",
+                        system_prompt: str | None = None,
+                        extra_instructions: str | None = None) -> dict:
         """Генерация курса через OpenAI API.
 
         Args:
             topic: Тема курса.
             num_pages: Количество страниц (по умолчанию из config).
             language: Язык курса (по умолчанию из config).
+            temperature: Температура генерации (0.0-1.5).
+            max_tokens: Максимальное количество токенов.
+            blocks_per_page: Блоков на страницу (2-5).
+            questions_per_page: Вопросов на страницу (1-3).
+            detail_level: Уровень детальности (brief/normal/detailed/expert).
+            system_prompt: Кастомный системный промпт.
+            extra_instructions: Дополнительные инструкции.
 
         Returns:
             dict — JSON-структура курса.
@@ -85,8 +99,16 @@ class LLMCourseGenerator:
 
         num_pages = num_pages or config.DEFAULT_NUM_PAGES
         language = language or config.DEFAULT_COURSE_LANGUAGE
+        temperature = temperature if temperature is not None else config.OPENAI_TEMPERATURE
+        max_tokens = max_tokens or config.OPENAI_MAX_TOKENS
 
-        prompt = self._build_prompt(topic, num_pages, language)
+        prompt = self._build_prompt(
+            topic, num_pages, language,
+            blocks_per_page=blocks_per_page,
+            questions_per_page=questions_per_page,
+            detail_level=detail_level,
+            extra_instructions=extra_instructions,
+        )
 
         try:
             from openai import OpenAI
@@ -103,21 +125,21 @@ class LLMCourseGenerator:
 
             client = OpenAI(**client_kwargs)
 
+            # Системный промпт
+            sys_prompt = system_prompt or (
+                "Ты — генератор учебных курсов. "
+                "Генерируй только валидный JSON без комментариев и markdown."
+            )
+
             # Параметры запроса
             request_kwargs = {
                 "model": self.model,
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Ты — генератор учебных курсов. "
-                            "Генерируй только валидный JSON без комментариев и markdown."
-                        ),
-                    },
+                    {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": prompt},
                 ],
-                "temperature": config.OPENAI_TEMPERATURE,
-                "max_tokens": config.OPENAI_MAX_TOKENS,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
             }
 
             # json_object mode поддерживается не всеми моделями
@@ -179,21 +201,42 @@ class LLMCourseGenerator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_prompt(topic: str, num_pages: int, language: str) -> str:
+    def _build_prompt(topic: str, num_pages: int, language: str,
+                      blocks_per_page: int = 3, questions_per_page: int = 1,
+                      detail_level: str = "normal",
+                      extra_instructions: str | None = None) -> str:
         """Формирование промпта для LLM."""
 
         lang_label = "русском" if language == "ru" else "английском"
 
+        # Детальность
+        detail_map = {
+            "brief": "Каждый текстовый блок — 2-3 предложения, только самое важное.",
+            "normal": "Каждый текстовый блок — 1-2 абзаца с теорией и примерами.",
+            "detailed": "Каждый текстовый блок — 2-3 абзаца с подробными объяснениями, примерами и определениями.",
+            "expert": "Каждый текстовый блок — 3-5 абзацев с углублённым анализом, примерами кода, таблицами и ссылками.",
+        }
+        detail_text = detail_map.get(detail_level, detail_map["normal"])
+
+        text_blocks = blocks_per_page - questions_per_page
+        if text_blocks < 1:
+            text_blocks = 1
+
+        extra = ""
+        if extra_instructions:
+            extra = f"\n\nДополнительные требования:\n{extra_instructions}"
+
         return f"""Создай учебный курс на тему "{topic}" на {lang_label} языке.
 
 Курс должен содержать ровно {num_pages} страниц.
-Каждая страница должна содержать 2-4 блока.
+Каждая страница должна содержать {text_blocks} текстовых блок(ов) с теорией
+и {questions_per_page} вопрос(ов) (mcq или truefalse).
+Итого {blocks_per_page} блоков на каждой странице.
+
+{detail_text}
+
 Блоки могут быть трёх типов: "text", "mcq" (вопрос с вариантами), "truefalse".
-
-Каждая страница должна содержать хотя бы один текстовый блок с теорией
-и хотя бы один вопрос (mcq или truefalse).
-
-Для MCQ вопросов: 3-5 вариантов ответа, ровно один correct: true.
+Для MCQ вопросов: 3-5 вариантов ответа, ровно один correct: true.{extra}
 
 Верни JSON в следующем формате:
 {{

@@ -251,6 +251,15 @@ def generate_course():
     model = data.get("model", "")
     api_key = data.get("api_key", "")
 
+    # Advanced settings
+    temperature = float(data.get("temperature", 0.7))
+    max_tokens = int(data.get("max_tokens", 4096))
+    blocks_per_page = int(data.get("blocks_per_page", 3))
+    questions_per_page = int(data.get("questions_per_page", 1))
+    detail_level = data.get("detail_level", "normal")
+    system_prompt = data.get("system_prompt", "")
+    extra_instructions = data.get("extra_instructions", "")
+
     if not topic:
         return jsonify({"ok": False, "error": "Укажите тему курса"})
 
@@ -268,6 +277,13 @@ def generate_course():
             topic=topic,
             num_pages=pages,
             language=lang,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            blocks_per_page=blocks_per_page,
+            questions_per_page=questions_per_page,
+            detail_level=detail_level,
+            system_prompt=system_prompt or None,
+            extra_instructions=extra_instructions or None,
         )
 
         _state["last_course_json"] = course

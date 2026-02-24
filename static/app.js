@@ -188,6 +188,13 @@ async function generateCourse() {
             base_url: settings.llm_base_url,
             model: settings.llm_model,
             api_key: settings.llm_api_key,
+            temperature: parseFloat(document.getElementById('temperature').value),
+            max_tokens: parseInt(document.getElementById('max-tokens').value),
+            blocks_per_page: parseInt(document.getElementById('blocks-per-page').value),
+            questions_per_page: parseInt(document.getElementById('questions-per-page').value),
+            detail_level: document.getElementById('detail-level').value,
+            system_prompt: document.getElementById('system-prompt').value.trim(),
+            extra_instructions: document.getElementById('extra-instructions').value.trim(),
         });
 
         hideProgress();
