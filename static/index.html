@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM → SCORM → Chamilo</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <span class="logo-icon">🚀</span>
+                <span class="logo-text">SCORM<span class="logo-accent">Generator</span></span>
+            </div>
+
+            <!-- Chamilo Connection -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('chamilo-panel')">
+                    <span>📡 Chamilo LMS</span>
+                    <span class="status-dot" id="chamilo-status"></span>
+                </div>
+                <div class="panel-body" id="chamilo-panel">
+                    <div class="field">
+                        <label>URL</label>
+                        <input type="text" id="chamilo-url" placeholder="http://192.168.8.179/chamilo">
+                    </div>
+                    <div class="field">
+                        <label>Логин</label>
+                        <input type="text" id="chamilo-user" placeholder="admin">
+                    </div>
+                    <div class="field">
+                        <label>Пароль</label>
+                        <input type="password" id="chamilo-pass" placeholder="password">
+                    </div>
+                    <button class="btn btn-sm" onclick="testChamilo()">
+                        <span id="chamilo-btn-text">Проверить</span>
+                    </button>
+                    <div class="status-msg" id="chamilo-msg"></div>
+                </div>
+            </div>
+
+            <!-- LLM Connection -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('llm-panel')">
+                    <span>🤖 LLM Модель</span>
+                    <span class="status-dot" id="llm-status"></span>
+                </div>
+                <div class="panel-body" id="llm-panel">
+                    <div class="field">
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="llm-type" value="local" checked onchange="toggleLLMType()">
+                                <span>Локальная (Ollama)</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="llm-type" value="api" onchange="toggleLLMType()">
+                                <span>OpenAI API</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div id="llm-local-fields">
+                        <div class="field">
+                            <label>URL сервера</label>
+                            <input type="text" id="llm-url" placeholder="http://192.168.8.106:11434/v1">
+                        </div>
+                        <div class="field">
+                            <label>Модель</label>
+                            <input type="text" id="llm-model" placeholder="qwen2.5:72b">
+                        </div>
+                    </div>
+                    <div id="llm-api-fields" style="display:none">
+                        <div class="field">
+                            <label>API Key</label>
+                            <input type="password" id="llm-apikey" placeholder="sk-...">
+                        </div>
+                        <div class="field">
+                            <label>Модель</label>
+                            <input type="text" id="llm-model-api" placeholder="gpt-4o-mini">
+                        </div>
+                    </div>
+                    <button class="btn btn-sm" onclick="testLLM()">
+                        <span id="llm-btn-text">Проверить</span>
+                    </button>
+                    <div class="status-msg" id="llm-msg"></div>
+                </div>
+            </div>
+
+            <!-- Save -->
+            <button class="btn btn-save" onclick="saveSettings()">💾 Сохранить настройки</button>
+
+            <!-- CLI Reference -->
+            <div class="panel cli-panel">
+                <div class="panel-header" onclick="togglePanel('cli-panel-body')">
+                    <span>⌨️ CLI команды</span>
+                    <span class="chevron">▾</span>
+                </div>
+                <div class="panel-body collapsed" id="cli-panel-body">
+                    <div class="cli-table">
+                        <div class="cli-row">
+                            <span class="cli-desc">По теме</span>
+                            <code>python main.py --topic "Тема"</code>
+                        </div>
+                        <div class="cli-row">
+                            <span class="cli-desc">+ Chamilo</span>
+                            <code>python main.py --topic "Тема" --upload</code>
+                        </div>
+                        <div class="cli-row">
+                            <span class="cli-desc">Из JSON</span>
+                            <code>python main.py -i file.json</code>
+                        </div>
+                        <div class="cli-row">
+                            <span class="cli-desc">5 стр.</span>
+                            <code>python main.py --topic "X" -p 5</code>
+                        </div>
+                        <div class="cli-row">
+                            <span class="cli-desc">English</span>
+                            <code>python main.py --topic "X" -l en</code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Generation Form -->
+            <section class="gen-section">
+                <h2>Генерация курса</h2>
+
+                <div class="gen-tabs">
+                    <button class="tab active" onclick="switchTab('ai')" id="tab-ai">🤖 Через ИИ</button>
+                    <button class="tab" onclick="switchTab('json')" id="tab-json">📄 Из JSON</button>
+                </div>
+
+                <!-- AI Generation -->
+                <div class="gen-form" id="form-ai">
+                    <div class="form-row">
+                        <div class="field flex-grow">
+                            <label>Тема курса</label>
+                            <input type="text" id="topic" placeholder="Например: Основы кибербезопасности"
+                                class="input-lg">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="field">
+                            <label>Страниц</label>
+                            <select id="pages">
+                                <option value="2">2</option>
+                                <option value="3" selected>3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="8">8</option>
+                                <option value="10">10</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Язык</label>
+                            <select id="lang">
+                                <option value="ru">🇷🇺 Русский</option>
+                                <option value="en">🇬🇧 English</option>
+                            </select>
+                        </div>
+                        <div class="field flex-grow"></div>
+                        <button class="btn btn-primary btn-lg" onclick="generateCourse()" id="btn-generate">
+                            🤖 Сгенерировать
+                        </button>
+                    </div>
+                </div>
+
+                <!-- JSON Upload -->
+                <div class="gen-form" id="form-json" style="display:none">
+                    <div class="form-row">
+                        <div class="field flex-grow">
+                            <label>JSON файл</label>
+                            <div class="file-drop" id="file-drop"
+                                onclick="document.getElementById('json-file').click()">
+                                <span>📄 Перетащите JSON или нажмите для выбора</span>
+                                <input type="file" id="json-file" accept=".json" style="display:none"
+                                    onchange="loadJSON(this)">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress -->
+            <div class="progress-section" id="progress-section" style="display:none">
+                <div class="progress-bar-wrap">
+                    <div class="progress-bar" id="gen-progress"></div>
+                </div>
+                <div class="progress-text" id="progress-text">Генерация курса...</div>
+            </div>
+
+            <!-- Preview -->
+            <section class="preview-section" id="preview-section" style="display:none">
+                <h2>Предпросмотр курса</h2>
+
+                <div class="course-header" id="course-header"></div>
+                <div class="course-pages" id="course-pages"></div>
+
+                <!-- Actions -->
+                <div class="actions">
+                    <div class="actions-left">
+                        <select id="chamilo-course-select">
+                            <option value="">Выберите курс Chamilo...</option>
+                        </select>
+                    </div>
+                    <div class="actions-right">
+                        <button class="btn btn-secondary" onclick="downloadSCORM()" id="btn-download">
+                            💾 Скачать SCORM
+                        </button>
+                        <button class="btn btn-primary" onclick="uploadToChamilo()" id="btn-upload">
+                            📤 Загрузить в Chamilo
+                        </button>
+                    </div>
+                </div>
+
+                <div class="status-msg action-msg" id="action-msg"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
