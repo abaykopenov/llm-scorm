@@ -10,6 +10,13 @@
 
 import os
 
+# Загрузка .env файла (если есть)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv не установлен — используем только переменные окружения
+
 # ==============================
 # LLM Configuration
 # ==============================
@@ -39,3 +46,11 @@ DEFAULT_NUM_PAGES = 3
 TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 EXAMPLES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples")
+
+# ==============================
+# Chamilo LMS Configuration
+# ==============================
+CHAMILO_URL = os.getenv("CHAMILO_URL", "")           # http://192.168.1.50/chamilo
+CHAMILO_USER = os.getenv("CHAMILO_USER", "admin")
+CHAMILO_PASSWORD = os.getenv("CHAMILO_PASSWORD", "")
+CHAMILO_API_KEY = os.getenv("CHAMILO_API_KEY", "")
