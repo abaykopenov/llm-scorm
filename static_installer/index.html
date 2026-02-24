@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chamilo LMS — Installer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0e1a;
+            --card: #111827;
+            --card2: #0d1117;
+            --border: #1e293b;
+            --focus: #6366f1;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --dim: #64748b;
+            --accent: #6366f1;
+            --accent-h: #818cf8;
+            --glow: rgba(99, 102, 241, 0.3);
+            --ok: #22c55e;
+            --ok-bg: rgba(34, 197, 94, 0.15);
+            --err: #ef4444;
+            --err-bg: rgba(239, 68, 68, 0.15);
+            --warn: #f59e0b;
+            --r: 12px;
+            --font: 'Inter', -apple-system, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .app {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .header h1 span {
+            color: var(--accent);
+        }
+
+        .header p {
+            color: var(--muted);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        /* Steps */
+        .steps {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            justify-content: center;
+        }
+
+        .step-dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--card);
+            border: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--dim);
+            transition: all 0.3s;
+        }
+
+        .step-dot.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: 0 0 12px var(--glow);
+        }
+
+        .step-dot.done {
+            border-color: var(--ok);
+            background: var(--ok);
+            color: white;
+        }
+
+        .step-line {
+            width: 40px;
+            height: 2px;
+            background: var(--border);
+            align-self: center;
+        }
+
+        .step-line.done {
+            background: var(--ok);
+        }
+
+        /* Panels */
+        .panel {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--r);
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+
+        .panel h2 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel h2 .icon {
+            font-size: 20px;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+
+        .field label {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input,
+        select {
+            background: var(--card2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text);
+            font-family: var(--font);
+            font-size: 14px;
+            outline: none;
+            width: 100%;
+            transition: border 0.2s;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: var(--focus);
+            box-shadow: 0 0 0 3px var(--glow);
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .row>* {
+            flex: 1;
+        }
+
+        .btn {
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-family: var(--font);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-h);
+            box-shadow: 0 4px 20px var(--glow);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: var(--card2);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--card);
+            border-color: var(--dim);
+        }
+
+        .btn-lg {
+            padding: 14px 28px;
+            font-size: 16px;
+            width: 100%;
+        }
+
+        .btn-sm {
+            padding: 8px 14px;
+            font-size: 12px;
+        }
+
+        .status-msg {
+            font-size: 13px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            margin-top: 8px;
+            display: none;
+            word-break: break-word;
+        }
+
+        .status-msg.show {
+            display: block;
+        }
+
+        .status-msg.ok {
+            background: var(--ok-bg);
+            color: var(--ok);
+        }
+
+        .status-msg.fail {
+            background: var(--err-bg);
+            color: var(--err);
+        }
+
+        /* Progress */
+        .progress-wrap {
+            background: var(--card2);
+            border-radius: 20px;
+            height: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent-h));
+            border-radius: 20px;
+            width: 0%;
+            transition: width 0.5s;
+        }
+
+        .progress-text {
+            text-align: center;
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 6px;
+        }
+
+        /* Logs */
+        .log-box {
+            background: var(--card2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--muted);
+            max-height: 350px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        .log-box .ok {
+            color: var(--ok);
+        }
+
+        .log-box .err {
+            color: var(--err);
+        }
+
+        .log-box .info {
+            color: var(--accent);
+        }
+
+        .result-box {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .result-box .big-icon {
+            font-size: 48px;
+        }
+
+        .result-box h3 {
+            margin: 12px 0 8px;
+            font-size: 20px;
+        }
+
+        .result-box a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 15px;
+        }
+
+        .result-box a:hover {
+            text-decoration: underline;
+        }
+
+        .creds {
+            background: var(--card2);
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 12px;
+            text-align: left;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <div class="header">
+            <h1>🔧 Chamilo <span>Installer</span></h1>
+            <p>Установка Chamilo LMS на удалённый сервер</p>
+        </div>
+
+        <!-- Steps -->
+        <div class="steps">
+            <div class="step-dot active" id="sd1">1</div>
+            <div class="step-line" id="sl1"></div>
+            <div class="step-dot" id="sd2">2</div>
+            <div class="step-line" id="sl2"></div>
+            <div class="step-dot" id="sd3">3</div>
+        </div>
+
+        <!-- Step 1: SSH -->
+        <div id="step1">
+            <div class="panel">
+                <h2><span class="icon">🖥</span> Подключение к серверу</h2>
+                <div class="row">
+                    <div class="field">
+                        <label>IP сервера</label>
+                        <input type="text" id="ssh-host" placeholder="192.168.8.179">
+                    </div>
+                    <div class="field" style="max-width:100px">
+                        <label>Порт</label>
+                        <input type="text" id="ssh-port" value="22">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="field">
+                        <label>SSH логин</label>
+                        <input type="text" id="ssh-user" value="root">
+                    </div>
+                    <div class="field">
+                        <label>SSH пароль</label>
+                        <input type="password" id="ssh-pass" placeholder="пароль от сервера">
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="testSSH()">🔗 Проверить подключение</button>
+                <div class="status-msg" id="ssh-msg"></div>
+            </div>
+
+            <button class="btn btn-primary btn-lg" onclick="goStep(2)" id="btn-next1">Далее →</button>
+        </div>
+
+        <!-- Step 2: Config -->
+        <div id="step2" class="hidden">
+            <div class="panel">
+                <h2><span class="icon">🗄</span> База данных</h2>
+                <div class="row">
+                    <div class="field">
+                        <label>Имя базы</label>
+                        <input type="text" id="db-name" value="chamilo_db">
+                    </div>
+                    <div class="field">
+                        <label>Пользователь БД</label>
+                        <input type="text" id="db-user" value="chamilo_user">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Пароль БД</label>
+                    <input type="text" id="db-pass" value="StrongPassword123!">
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2><span class="icon">👤</span> Администратор Chamilo</h2>
+                <div class="row">
+                    <div class="field">
+                        <label>Логин</label>
+                        <input type="text" id="admin-login" value="admin">
+                    </div>
+                    <div class="field">
+                        <label>Пароль</label>
+                        <input type="text" id="admin-pass" value="admin123">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Email</label>
+                    <input type="text" id="admin-email" value="admin@example.com">
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2><span class="icon">⚙️</span> Настройки</h2>
+                <div class="row">
+                    <div class="field">
+                        <label>Версия Chamilo</label>
+                        <select id="chamilo-ver">
+                            <option value="1.11.26" selected>1.11.26 (стабильная)</option>
+                            <option value="1.11.24">1.11.24</option>
+                            <option value="1.11.22">1.11.22</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Язык</label>
+                        <select id="platform-lang">
+                            <option value="russian" selected>🇷🇺 Русский</option>
+                            <option value="english">🇬🇧 English</option>
+                            <option value="spanish">🇪🇸 Español</option>
+                            <option value="french">🇫🇷 Français</option>
+                            <option value="german">🇩🇪 Deutsch</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px;">
+                <button class="btn btn-secondary" onclick="goStep(1)" style="flex:1">← Назад</button>
+                <button class="btn btn-primary" onclick="startInstall()" style="flex:2" id="btn-install">🚀 Установить
+                    Chamilo</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Progress -->
+        <div id="step3" class="hidden">
+            <div class="panel">
+                <h2><span class="icon">📦</span> <span id="install-title">Установка...</span></h2>
+                <div class="progress-wrap">
+                    <div class="progress-fill" id="pbar"></div>
+                </div>
+                <div class="progress-text" id="ptext">0%</div>
+                <div class="log-box" id="log-box"></div>
+            </div>
+
+            <div class="panel hidden" id="result-panel">
+                <div class="result-box" id="result-box"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === API ===
+        async function api(url, data) {
+            const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+            return r.json();
+        }
+
+        // === Steps ===
+        function goStep(n) {
+            document.getElementById('step1').classList.toggle('hidden', n !== 1);
+            document.getElementById('step2').classList.toggle('hidden', n !== 2);
+            document.getElementById('step3').classList.toggle('hidden', n !== 3);
+            for (let i = 1; i <= 3; i++) {
+                document.getElementById('sd' + i).classList.toggle('active', i === n);
+                document.getElementById('sd' + i).classList.toggle('done', i < n);
+            }
+            document.getElementById('sl1').classList.toggle('done', n >= 2);
+            document.getElementById('sl2').classList.toggle('done', n >= 3);
+        }
+
+        // === SSH Test ===
+        async function testSSH() {
+            const msg = document.getElementById('ssh-msg');
+            msg.className = 'status-msg'; msg.style.display = 'none';
+            try {
+                const r = await api('/api/test-ssh', {
+                    host: document.getElementById('ssh-host').value.trim(),
+                    port: document.getElementById('ssh-port').value.trim(),
+                    user: document.getElementById('ssh-user').value.trim(),
+                    password: document.getElementById('ssh-pass').value,
+                });
+                msg.textContent = r.ok ? '✅ ' + r.message : '❌ ' + r.error;
+                msg.className = 'status-msg show ' + (r.ok ? 'ok' : 'fail');
+            } catch (e) {
+                msg.textContent = '❌ Нет связи'; msg.className = 'status-msg show fail';
+            }
+        }
+
+        // === Install ===
+        async function startInstall() {
+            goStep(3);
+            const data = {
+                host: document.getElementById('ssh-host').value.trim(),
+                port: document.getElementById('ssh-port').value.trim(),
+                ssh_user: document.getElementById('ssh-user').value.trim(),
+                ssh_password: document.getElementById('ssh-pass').value,
+                chamilo_ver: document.getElementById('chamilo-ver').value,
+                db_name: document.getElementById('db-name').value.trim(),
+                db_user: document.getElementById('db-user').value.trim(),
+                db_pass: document.getElementById('db-pass').value.trim(),
+                admin_login: document.getElementById('admin-login').value.trim(),
+                admin_pass: document.getElementById('admin-pass').value.trim(),
+                admin_email: document.getElementById('admin-email').value.trim(),
+                platform_lang: document.getElementById('platform-lang').value,
+            };
+            await api('/api/install', data);
+            pollStatus();
+        }
+
+        let pollTimer = null;
+        function pollStatus() {
+            pollTimer = setInterval(async () => {
+                try {
+                    const r = await fetch('/api/install-status');
+                    const d = await r.json();
+                    // Progress
+                    document.getElementById('pbar').style.width = d.progress + '%';
+                    document.getElementById('ptext').textContent = d.progress + '%';
+                    // Logs
+                    const box = document.getElementById('log-box');
+                    let html = '';
+                    d.logs.forEach(line => {
+                        if (line.includes('✅')) html += '<span class="ok">' + esc(line) + '</span>\n';
+                        else if (line.includes('❌')) html += '<span class="err">' + esc(line) + '</span>\n';
+                        else if (line.includes('📦') || line.includes('🔗') || line.includes('🗄') || line.includes('📥') || line.includes('⚙'))
+                            html += '<span class="info">' + esc(line) + '</span>\n';
+                        else html += esc(line) + '\n';
+                    });
+                    box.innerHTML = html;
+                    box.scrollTop = box.scrollHeight;
+
+                    if (d.status === 'done' || d.status === 'error') {
+                        clearInterval(pollTimer);
+                        document.getElementById('install-title').textContent = d.status === 'done' ? 'Установка завершена!' : 'Ошибка установки';
+                        showResult(d.status);
+                    }
+                } catch (e) { }
+            }, 1500);
+        }
+
+        function showResult(status) {
+            const panel = document.getElementById('result-panel');
+            const box = document.getElementById('result-box');
+            panel.classList.remove('hidden');
+            if (status === 'done') {
+                const host = document.getElementById('ssh-host').value.trim();
+                const login = document.getElementById('admin-login').value.trim();
+                const pass = document.getElementById('admin-pass').value.trim();
+                box.innerHTML = `
+                    <div class="big-icon">🎉</div>
+                    <h3>Chamilo установлен!</h3>
+                    <a href="http://${host}/chamilo/" target="_blank">http://${host}/chamilo/</a>
+                    <div class="creds">
+                        Логин: <strong>${login}</strong><br>
+                        Пароль: <strong>${pass}</strong>
+                    </div>`;
+            } else {
+                box.innerHTML = `<div class="big-icon">❌</div><h3>Ошибка</h3><p style="color:var(--muted)">Проверьте логи выше</p>`;
+            }
+        }
+
+        function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    </script>
+</body>
+
+</html>
