@@ -120,6 +120,16 @@ def main():
         except (ValueError, ImportError) as e:
             print(f"\n❌ Ошибка: {e}", file=sys.stderr)
             sys.exit(1)
+        except Exception as e:
+            err_msg = str(e)
+            if "insufficient_quota" in err_msg or "429" in err_msg:
+                print(f"\n❌ Ошибка: Квота OpenAI исчерпана.", file=sys.stderr)
+                print("   Проверьте баланс: https://platform.openai.com/account/billing", file=sys.stderr)
+            elif "401" in err_msg or "invalid_api_key" in err_msg:
+                print(f"\n❌ Ошибка: Неверный API ключ OpenAI.", file=sys.stderr)
+            else:
+                print(f"\n❌ Ошибка LLM: {e}", file=sys.stderr)
+            sys.exit(1)
 
     print(f"\n📝 Курс: {course.get('title', 'Без названия')}")
     print(f"   Страниц: {len(course.get('pages', []))}")
