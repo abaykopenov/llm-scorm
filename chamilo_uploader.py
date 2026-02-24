@@ -203,33 +203,68 @@ class ChamiloUploader:
     def _upload_scorm(self, scorm_zip_path: str, course_code: str) -> bool:
         """Загрузка SCORM-пакета в Learning Path курса."""
 
-        # URL страницы импорта SCORM
-        # Chamilo 1.11.x: /main/lp/lp_controller.php?action=import&cidReq=CODE
-        import_url = (
-            f"{self.chamilo_url}/main/lp/lp_controller.php"
-            f"?cidReq={course_code}&action=import_scorm"
+        # Chamilo 1.11.x: SCORM upload через /main/upload/upload.php
+        # Сначала открываем страницу формы для получения токенов
+        form_url = (
+            f"{self.chamilo_url}/main/upload/index.php"
+            f"?cidReq={course_code}&id_session=0&gidReq=0"
+            f"&gradebook=0&origin=&curdirpath=/&tool=learnpath"
         )
 
         print(f"📤 Загрузка файла: {os.path.basename(scorm_zip_path)}")
 
-        # Получаем страницу импорта (для токенов)
         try:
-            resp = self.session.get(import_url, timeout=15)
+            resp = self.session.get(form_url, timeout=15)
         except requests.RequestException as e:
             print(f"❌ Ошибка доступа к странице импорта: {e}")
             return False
 
-        # Ищем токен на странице импорта
-        token = ""
-        token_match = re.search(
-            r'name=["\'](?:_token|sec_token)["\']\s+value=["\']([^"\']+)["\']',
-            resp.text
+        # Ищем action формы (URL куда отправлять)
+        action_match = re.search(
+            r'<form[^>]*action=["\']([^"\']*upload\.php[^"\']*)["\']',
+            resp.text, re.IGNORECASE
         )
-        if token_match:
-            token = token_match.group(1)
+        if action_match:
+            import html as html_mod
+            upload_url = html_mod.unescape(action_match.group(1))
+            # Если URL относительный — делаем абсолютным
+            if upload_url.startswith("/"):
+                from urllib.parse import urlparse
+                parsed = urlparse(self.chamilo_url)
+                upload_url = f"{parsed.scheme}://{parsed.netloc}{upload_url}"
+            elif not upload_url.startswith("http"):
+                upload_url = f"{self.chamilo_url}/main/upload/{upload_url}"
+        else:
+            # Fallback URL
+            upload_url = (
+                f"{self.chamilo_url}/main/upload/upload.php"
+                f"?cidReq={course_code}&id_session=0&gidReq=0"
+                f"&gradebook=0&origin="
+            )
+
+        print(f"   URL: {upload_url}")
+
+        # Ищем скрытые поля формы
+        hidden_fields = {}
+        for m in re.finditer(
+            r'<input[^>]*type=["\']hidden["\'][^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\']',
+            resp.text, re.IGNORECASE
+        ):
+            hidden_fields[m.group(1)] = m.group(2)
+
+        # Также ищем в обратном порядке (value перед name)
+        for m in re.finditer(
+            r'<input[^>]*value=["\']([^"\']*)["\'][^>]*type=["\']hidden["\'][^>]*name=["\']([^"\']+)["\']',
+            resp.text, re.IGNORECASE
+        ):
+            hidden_fields[m.group(2)] = m.group(1)
+
+        print(f"   Форма: {list(hidden_fields.keys())}")
 
         # Загружаем файл
         filename = os.path.basename(scorm_zip_path)
+        file_size = os.path.getsize(scorm_zip_path)
+
         try:
             with open(scorm_zip_path, "rb") as f:
                 files = {
@@ -237,31 +272,59 @@ class ChamiloUploader:
                 }
                 data = {
                     "submit": "Upload",
+                    "use_max_score": "1",
+                    "curdirpath": "/",
+                    "tool": "learnpath",
+                    "MAX_FILE_SIZE": str(max(file_size * 2, 100000000)),
                 }
-                if token:
-                    data["sec_token"] = token
-                    data["_token"] = token
+                # Добавляем скрытые поля
+                data.update(hidden_fields)
 
                 resp = self.session.post(
-                    import_url,
+                    upload_url,
                     files=files,
                     data=data,
-                    timeout=60,
+                    timeout=120,
                     allow_redirects=True,
                 )
         except requests.RequestException as e:
             print(f"❌ Ошибка загрузки: {e}")
             return False
 
-        # Проверяем успешность
-        if resp.status_code == 200:
-            # Ищем признаки успешной загрузки
-            if ("lp_controller.php" in resp.url and "action=import" not in resp.url):
+        print(f"   HTTP {resp.status_code}, URL: {resp.url}")
+
+        # Проверяем результат
+        text_lower = resp.text.lower()
+
+        # Признаки успеха: Chamilo редиректит на lp_controller или показывает LP
+        if resp.status_code in (200, 302):
+            # Успешный импорт: в ответе есть информация о новом LP
+            if "lp_controller.php" in resp.url:
+                print("   ✅ Редирект на Learning Path — загрузка успешна")
                 return True
-            if "success" in resp.text.lower() or "imported" in resp.text.lower():
+            if "scorm" in text_lower and ("success" in text_lower or "import" in text_lower):
                 return True
-            # Если нет явной ошибки — считаем успехом
-            if "error" not in resp.text.lower()[:500]:
+            # Если на странице есть ссылка на только что загруженный LP
+            if re.search(r'lp_controller\.php.*action=view', resp.text):
                 return True
 
+            # Проверяем наличие ошибок
+            error_patterns = [
+                "error", "not allowed", "permission denied",
+                "invalid file", "ошибка", "не удалось",
+            ]
+            has_error = any(p in text_lower[:2000] for p in error_patterns)
+
+            if not has_error and resp.status_code == 200:
+                # Вероятно успех — страница загрузилась без ошибок
+                print("   ✅ Страница без ошибок — загрузка вероятно успешна")
+                return True
+
+        print(f"   ❌ Неожиданный ответ (HTTP {resp.status_code})")
+        # Save debug info
+        debug_path = os.path.join(os.path.dirname(__file__), "_upload_debug.html")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            f.write(resp.text)
+        print(f"   Ответ сохранён: {debug_path}")
         return False
+
