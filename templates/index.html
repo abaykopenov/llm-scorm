@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- Sidebar Toggle (mobile) -->
+    <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Меню">☰</button>
+
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h1>{{ title }}</h1>
+                {% if description %}
+                <p class="course-desc">{{ description }}</p>
+                {% endif %}
+            </div>
+            <nav class="sidebar-nav" id="sidebarNav">
+                {% for page in pages %}
+                <div class="nav-item{% if loop.first %} active{% endif %}" data-page="{{ loop.index0 }}"
+                    onclick="goToPage({{ loop.index0 }})">
+                    <span class="nav-dot"></span>
+                    <span>{{ page.title }}</span>
+                </div>
+                {% endfor %}
+            </nav>
+            <div class="sidebar-footer">
+                <div class="progress-text">
+                    <span>Прогресс</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Pages -->
+            {% for page in pages %}
+            {% set page_idx = loop.index0 %}
+            <div class="page-container" id="page-{{ page_idx }}" style="{% if not loop.first %}display:none{% endif %}">
+                <h2 class="page-title">{{ page.title }}</h2>
+
+                {% for block in page.blocks %}
+                {% set block_idx = loop.index0 %}
+                {% set quiz_id = "quiz-" ~ page_idx ~ "-" ~ block_idx %}
+                {% if block.type == 'text' %}
+                <!-- Text Block -->
+                <div class="block">
+                    <div class="block-title">
+                        <span class="block-icon text-icon">📖</span>
+                        {{ block.title }}
+                    </div>
+                    <div class="block-body">
+                        {{ block.body }}
+                    </div>
+                </div>
+
+                {% elif block.type == 'mcq' %}
+                <!-- MCQ Block -->
+                <div class="block quiz-block" id="{{ quiz_id }}">
+                    <div class="block-title">
+                        <span class="block-icon quiz-icon">❓</span>
+                        {{ block.title }}
+                    </div>
+                    <p class="quiz-question">{{ block.body }}</p>
+                    <div class="quiz-options">
+                        {% for opt in block.options %}
+                        <div class="quiz-option" data-correct="{{ opt.correct | lower }}" data-quiz="{{ quiz_id }}"
+                            onclick="selectOption(this)">
+                            <span class="quiz-radio"></span>
+                            <span>{{ opt.text }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <button class="quiz-submit" disabled onclick="submitQuiz('{{ quiz_id }}', 'mcq')"
+                        id="btn-{{ quiz_id }}">
+                        Проверить ответ
+                    </button>
+                    <div class="quiz-feedback" id="fb-{{ quiz_id }}" data-correct="{{ block.feedback_correct }}"
+                        data-incorrect="{{ block.feedback_incorrect }}">
+                    </div>
+                </div>
+
+                {% elif block.type == 'truefalse' %}
+                <!-- True/False Block -->
+                <div class="block quiz-block" id="{{ quiz_id }}">
+                    <div class="block-title">
+                        <span class="block-icon quiz-icon">✅</span>
+                        {{ block.title }}
+                    </div>
+                    <p class="quiz-question">{{ block.body }}</p>
+                    <div class="tf-options">
+                        <button class="tf-btn" data-value="true"
+                            data-correct="{{ (block.correct_answer == true) | lower }}" data-quiz="{{ quiz_id }}"
+                            onclick="selectTF(this)">
+                            Верно
+                        </button>
+                        <button class="tf-btn" data-value="false"
+                            data-correct="{{ (block.correct_answer == false) | lower }}" data-quiz="{{ quiz_id }}"
+                            onclick="selectTF(this)">
+                            Неверно
+                        </button>
+                    </div>
+                    <button class="quiz-submit" disabled onclick="submitQuiz('{{ quiz_id }}', 'truefalse')"
+                        id="btn-{{ quiz_id }}">
+                        Проверить ответ
+                    </button>
+                    <div class="quiz-feedback" id="fb-{{ quiz_id }}" data-correct="{{ block.feedback_correct }}"
+                        data-incorrect="{{ block.feedback_incorrect }}">
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endfor %}
+
+
+            <!-- Completion Screen -->
+            <div class="completion-screen" id="completionScreen">
+                <div class="completion-icon">🎉</div>
+                <h2 class="completion-title">Курс завершён!</h2>
+                <p class="completion-text">Поздравляем! Вы прошли все страницы курса.</p>
+                <div class="completion-score" id="finalScore">0%</div>
+                <p class="completion-score-label">Итоговый результат</p>
+            </div>
+
+            <!-- Bottom padding for nav footer -->
+            <div style="height: 80px;"></div>
+        </main>
+    </div>
+
+    <!-- Navigation Footer -->
+    <div class="nav-footer">
+        <button class="nav-btn" id="btnPrev" onclick="prevPage()" disabled>
+            ← Назад
+        </button>
+        <span class="page-indicator" id="pageIndicator">1 / {{ pages | length }}</span>
+        <button class="nav-btn primary" id="btnNext" onclick="nextPage()">
+            Далее →
+        </button>
+    </div>
+
+    <script src="scorm_api.js"></script>
+    <script>
+        (function () {
+            "use strict";
+
+            var totalPages = {{ pages | length
+        }};
+        var currentPage = 0;
+        var visitedPages = new Set([0]);
+        var quizResults = {};
+        var totalQuizzes = 0;
+        var correctQuizzes = 0;
+
+        // Count total quizzes
+        document.querySelectorAll('.quiz-block').forEach(function () { totalQuizzes++; });
+
+        // Initialize SCORM
+        SCORM.initialize();
+
+        // Restore location
+        var saved = SCORM.getLocation();
+        if (saved && !isNaN(parseInt(saved))) {
+            goToPage(parseInt(saved));
+        }
+
+        // ------------------------------------------------------------------
+        // Navigation
+        // ------------------------------------------------------------------
+        window.goToPage = function (idx) {
+            if (idx < 0 || idx >= totalPages) return;
+
+            // Hide current
+            var cur = document.getElementById('page-' + currentPage);
+            if (cur) cur.style.display = 'none';
+
+            // Show completion on last page + next
+            if (idx >= totalPages) {
+                showCompletion();
+                return;
+            }
+
+            // Show target
+            var target = document.getElementById('page-' + idx);
+            if (target) target.style.display = '';
+
+            document.getElementById('completionScreen').classList.remove('show');
+
+            currentPage = idx;
+            visitedPages.add(idx);
+
+            updateNav();
+            updateProgress();
+            SCORM.setLocation(String(idx));
+            SCORM.commit();
+
+            // Close sidebar on mobile
+            document.getElementById('sidebar').classList.remove('open');
+        };
+
+        window.nextPage = function () {
+            if (currentPage < totalPages - 1) {
+                goToPage(currentPage + 1);
+            } else {
+                showCompletion();
+            }
+        };
+
+        window.prevPage = function () {
+            if (currentPage > 0) {
+                goToPage(currentPage - 1);
+            }
+        };
+
+        window.toggleSidebar = function () {
+            document.getElementById('sidebar').classList.toggle('open');
+        };
+
+        function updateNav() {
+            document.getElementById('btnPrev').disabled = currentPage === 0;
+            document.getElementById('btnNext').textContent =
+                currentPage === totalPages - 1 ? 'Завершить ✓' : 'Далее →';
+            document.getElementById('pageIndicator').textContent =
+                (currentPage + 1) + ' / ' + totalPages;
+
+            // Sidebar active
+            document.querySelectorAll('.nav-item').forEach(function (el, i) {
+                el.classList.toggle('active', i === currentPage);
+                el.classList.toggle('completed', visitedPages.has(i) && i !== currentPage);
+            });
+        }
+
+        function updateProgress() {
+            var pct = Math.round((visitedPages.size / totalPages) * 100);
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressPercent').textContent = pct + '%';
+
+            if (pct >= 100) {
+                SCORM.setLessonStatus('completed');
+            } else {
+                SCORM.setLessonStatus('incomplete');
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Quiz logic
+        // ------------------------------------------------------------------
+        window.selectOption = function (el) {
+            var quizId = el.getAttribute('data-quiz');
+            if (quizResults[quizId] !== undefined) return;
+
+            var options = el.parentElement.querySelectorAll('.quiz-option');
+            options.forEach(function (o) { o.classList.remove('selected'); });
+            el.classList.add('selected');
+
+            var btn = document.getElementById('btn-' + quizId);
+            if (btn) btn.disabled = false;
+        };
+
+        window.selectTF = function (el) {
+            var quizId = el.getAttribute('data-quiz');
+            if (quizResults[quizId] !== undefined) return;
+
+            var btns = el.parentElement.querySelectorAll('.tf-btn');
+            btns.forEach(function (b) { b.classList.remove('selected'); });
+            el.classList.add('selected');
+
+            var btn = document.getElementById('btn-' + quizId);
+            if (btn) btn.disabled = false;
+        };
+
+        window.submitQuiz = function (quizId, type) {
+            if (quizResults[quizId] !== undefined) return;
+
+            var block = document.getElementById(quizId);
+            var isCorrect = false;
+
+            if (type === 'mcq') {
+                var selected = block.querySelector('.quiz-option.selected');
+                if (!selected) return;
+                isCorrect = selected.getAttribute('data-correct') === 'true';
+
+                // Mark options
+                block.querySelectorAll('.quiz-option').forEach(function (o) {
+                    o.classList.add('disabled');
+                    if (o.getAttribute('data-correct') === 'true') {
+                        o.classList.add('correct');
+                    } else if (o === selected && !isCorrect) {
+                        o.classList.add('incorrect');
+                    }
+                });
+            } else {
+                var selected = block.querySelector('.tf-btn.selected');
+                if (!selected) return;
+                isCorrect = selected.getAttribute('data-correct') === 'true';
+
+                block.querySelectorAll('.tf-btn').forEach(function (b) {
+                    b.classList.add('disabled');
+                    if (b.getAttribute('data-correct') === 'true') {
+                        b.classList.add('correct');
+                    } else if (b === selected && !isCorrect) {
+                        b.classList.add('incorrect');
+                    }
+                });
+            }
+
+            quizResults[quizId] = isCorrect;
+            if (isCorrect) correctQuizzes++;
+
+            // Feedback
+            var fb = document.getElementById('fb-' + quizId);
+            if (fb) {
+                fb.textContent = isCorrect ? fb.getAttribute('data-correct') : fb.getAttribute('data-incorrect');
+                fb.className = 'quiz-feedback show ' + (isCorrect ? 'correct' : 'incorrect');
+            }
+
+            // Disable submit
+            var btn = document.getElementById('btn-' + quizId);
+            if (btn) btn.disabled = true;
+
+            // Update SCORM score
+            if (totalQuizzes > 0) {
+                var score = Math.round((correctQuizzes / totalQuizzes) * 100);
+                SCORM.setScore(score);
+            }
+            SCORM.commit();
+        };
+
+        // ------------------------------------------------------------------
+        // Completion
+        // ------------------------------------------------------------------
+        function showCompletion() {
+            document.querySelectorAll('.page-container').forEach(function (p) {
+                p.style.display = 'none';
+            });
+
+            var score = totalQuizzes > 0 ? Math.round((correctQuizzes / totalQuizzes) * 100) : 100;
+            document.getElementById('finalScore').textContent = score + '%';
+            document.getElementById('completionScreen').classList.add('show');
+
+            SCORM.setScore(score);
+            SCORM.setLessonStatus('completed');
+            SCORM.commit();
+        }
+
+        // Cleanup on unload
+        window.addEventListener('beforeunload', function () {
+            SCORM.finish();
+        });
+
+        // Initial state
+        updateNav();
+        updateProgress();
+    }) ();
+    </script>
+</body>
+
+</html>

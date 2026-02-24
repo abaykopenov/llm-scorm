@@ -1,0 +1,143 @@
+{
+    "title": "Основы Python",
+    "description": "Вводный курс по языку программирования Python для начинающих.",
+    "language": "ru",
+    "pages": [
+        {
+            "title": "Введение в Python",
+            "blocks": [
+                {
+                    "type": "text",
+                    "title": "Что такое Python?",
+                    "body": "<p><strong>Python</strong> — это высокоуровневый язык программирования общего назначения. Он был создан <em>Гвидо ван Россумом</em> и впервые выпущен в 1991 году.</p><p>Основные преимущества Python:</p><ul><li>Простой и читаемый синтаксис</li><li>Большая стандартная библиотека</li><li>Кроссплатформенность</li><li>Активное сообщество</li></ul><p>Python используется в веб-разработке, науке о данных, машинном обучении, автоматизации и многих других областях.</p>"
+                },
+                {
+                    "type": "text",
+                    "title": "Установка и первый запуск",
+                    "body": "<p>Для начала работы с Python необходимо:</p><ol><li>Скачать Python с официального сайта <code>python.org</code></li><li>Установить, отметив опцию <strong>Add to PATH</strong></li><li>Открыть терминал и ввести <code>python --version</code></li></ol><p>Для запуска первой программы создайте файл <code>hello.py</code>:</p><pre><code>print(\"Hello, World!\")</code></pre>"
+                },
+                {
+                    "type": "mcq",
+                    "title": "Проверка знаний: Python",
+                    "body": "В каком году был впервые выпущен Python?",
+                    "options": [
+                        {
+                            "text": "1989",
+                            "correct": false
+                        },
+                        {
+                            "text": "1991",
+                            "correct": true
+                        },
+                        {
+                            "text": "1995",
+                            "correct": false
+                        },
+                        {
+                            "text": "2000",
+                            "correct": false
+                        }
+                    ],
+                    "feedback_correct": "Правильно! Python был впервые выпущен в 1991 году.",
+                    "feedback_incorrect": "Неправильно. Python был впервые выпущен в 1991 году Гвидо ван Россумом."
+                }
+            ]
+        },
+        {
+            "title": "Переменные и типы данных",
+            "blocks": [
+                {
+                    "type": "text",
+                    "title": "Переменные в Python",
+                    "body": "<p>В Python переменные создаются при присвоении значения:</p><pre><code>name = \"Алиса\"\nage = 25\nheight = 1.68\nis_student = True</code></pre><p>Python — язык с <strong>динамической типизацией</strong>, то есть тип переменной определяется автоматически.</p>"
+                },
+                {
+                    "type": "text",
+                    "title": "Основные типы данных",
+                    "body": "<p>В Python есть несколько основных типов данных:</p><table><tr><th>Тип</th><th>Пример</th><th>Описание</th></tr><tr><td><code>int</code></td><td>42</td><td>Целое число</td></tr><tr><td><code>float</code></td><td>3.14</td><td>Число с плавающей точкой</td></tr><tr><td><code>str</code></td><td>\"Привет\"</td><td>Строка</td></tr><tr><td><code>bool</code></td><td>True / False</td><td>Логический тип</td></tr><tr><td><code>list</code></td><td>[1, 2, 3]</td><td>Список</td></tr><tr><td><code>dict</code></td><td>{\"a\": 1}</td><td>Словарь</td></tr></table>"
+                },
+                {
+                    "type": "mcq",
+                    "title": "Проверка: Типы данных",
+                    "body": "Какой тип данных имеет значение 3.14 в Python?",
+                    "options": [
+                        {
+                            "text": "int",
+                            "correct": false
+                        },
+                        {
+                            "text": "float",
+                            "correct": true
+                        },
+                        {
+                            "text": "str",
+                            "correct": false
+                        },
+                        {
+                            "text": "double",
+                            "correct": false
+                        }
+                    ],
+                    "feedback_correct": "Правильно! 3.14 — это число с плавающей точкой (float).",
+                    "feedback_incorrect": "Неправильно. 3.14 — это float (число с плавающей точкой). В Python нет типа double."
+                },
+                {
+                    "type": "truefalse",
+                    "title": "Верно или неверно?",
+                    "body": "В Python нужно явно указывать тип переменной при её создании.",
+                    "correct_answer": false,
+                    "feedback_correct": "Верно! Python использует динамическую типизацию — тип определяется автоматически.",
+                    "feedback_incorrect": "Неверно. Python использует динамическую типизацию, поэтому тип переменной определяется автоматически при присвоении значения."
+                }
+            ]
+        },
+        {
+            "title": "Условия и циклы",
+            "blocks": [
+                {
+                    "type": "text",
+                    "title": "Условные конструкции",
+                    "body": "<p>Условная конструкция <code>if/elif/else</code> позволяет выполнять код в зависимости от условия:</p><pre><code>age = 18\n\nif age >= 18:\n    print(\"Вы совершеннолетний\")\nelif age >= 14:\n    print(\"Вы подросток\")\nelse:\n    print(\"Вы ребёнок\")</code></pre><p><strong>Важно:</strong> В Python для обозначения блоков кода используются <em>отступы</em> (обычно 4 пробела), а не фигурные скобки.</p>"
+                },
+                {
+                    "type": "text",
+                    "title": "Циклы for и while",
+                    "body": "<p>Цикл <code>for</code> используется для перебора элементов:</p><pre><code>fruits = [\"яблоко\", \"банан\", \"вишня\"]\nfor fruit in fruits:\n    print(fruit)</code></pre><p>Цикл <code>while</code> выполняется, пока условие истинно:</p><pre><code>count = 0\nwhile count < 5:\n    print(count)\n    count += 1</code></pre>"
+                },
+                {
+                    "type": "mcq",
+                    "title": "Проверка: Управляющие конструкции",
+                    "body": "Что используется в Python для обозначения блоков кода вместо фигурных скобок?",
+                    "options": [
+                        {
+                            "text": "Круглые скобки",
+                            "correct": false
+                        },
+                        {
+                            "text": "Квадратные скобки",
+                            "correct": false
+                        },
+                        {
+                            "text": "Отступы (пробелы)",
+                            "correct": true
+                        },
+                        {
+                            "text": "Точка с запятой",
+                            "correct": false
+                        }
+                    ],
+                    "feedback_correct": "Правильно! Python использует отступы (обычно 4 пробела) для обозначения блоков кода.",
+                    "feedback_incorrect": "Неправильно. В Python для обозначения блоков кода используются отступы (обычно 4 пробела)."
+                },
+                {
+                    "type": "truefalse",
+                    "title": "Верно или неверно?",
+                    "body": "Цикл while в Python может выполняться бесконечно, если условие всегда истинно.",
+                    "correct_answer": true,
+                    "feedback_correct": "Верно! Если условие while всегда истинно и нет break, цикл будет бесконечным.",
+                    "feedback_incorrect": "Неверно. Цикл while действительно может быть бесконечным — например, while True: без break."
+                }
+            ]
+        }
+    ]
+}
