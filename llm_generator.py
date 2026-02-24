@@ -53,8 +53,10 @@ import config
 class LLMCourseGenerator:
     """Генератор JSON-структуры курса."""
 
-    def __init__(self, api_key: str | None = None, model: str | None = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None,
+                 base_url: str | None = None):
         self.api_key = api_key or config.OPENAI_API_KEY
+        self.base_url = base_url or config.OPENAI_BASE_URL or None
         self.model = model or config.OPENAI_MODEL
 
     # ------------------------------------------------------------------
@@ -73,10 +75,12 @@ class LLMCourseGenerator:
         Returns:
             dict — JSON-структура курса.
         """
-        if not self.api_key:
+        # Для локальных моделей API key не обязателен
+        if not self.api_key and not self.base_url:
             raise ValueError(
                 "OpenAI API key не задан. Установите переменную окружения "
-                "OPENAI_API_KEY или передайте ключ в конструктор."
+                "OPENAI_API_KEY или передайте ключ в конструктор.\n"
+                "Для локальных моделей укажите --base-url (API key не нужен)."
             )
 
         num_pages = num_pages or config.DEFAULT_NUM_PAGES
@@ -86,11 +90,23 @@ class LLMCourseGenerator:
 
         try:
             from openai import OpenAI
-            client = OpenAI(api_key=self.api_key)
 
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=[
+            # Настройка клиента: OpenAI API или локальная модель
+            client_kwargs = {}
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+                # Для локальных моделей API key может быть любым
+                client_kwargs["api_key"] = self.api_key or "local"
+                print(f"   Сервер: {self.base_url}")
+            else:
+                client_kwargs["api_key"] = self.api_key
+
+            client = OpenAI(**client_kwargs)
+
+            # Параметры запроса
+            request_kwargs = {
+                "model": self.model,
+                "messages": [
                     {
                         "role": "system",
                         "content": (
@@ -100,12 +116,33 @@ class LLMCourseGenerator:
                     },
                     {"role": "user", "content": prompt},
                 ],
-                temperature=config.OPENAI_TEMPERATURE,
-                max_tokens=config.OPENAI_MAX_TOKENS,
-                response_format={"type": "json_object"},
-            )
+                "temperature": config.OPENAI_TEMPERATURE,
+                "max_tokens": config.OPENAI_MAX_TOKENS,
+            }
+
+            # json_object mode поддерживается не всеми моделями
+            # (Ollama, vLLM обычно поддерживают, но некоторые — нет)
+            try:
+                request_kwargs["response_format"] = {"type": "json_object"}
+                response = client.chat.completions.create(**request_kwargs)
+            except Exception:
+                # Fallback: без response_format
+                del request_kwargs["response_format"]
+                response = client.chat.completions.create(**request_kwargs)
 
             raw = response.choices[0].message.content
+
+            # Очистка ответа от возможного markdown обрамления
+            raw = raw.strip()
+            if raw.startswith("```"):
+                # Убираем ```json ... ```
+                lines = raw.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                raw = "\n".join(lines)
+
             return json.loads(raw)
 
         except ImportError:

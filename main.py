@@ -5,14 +5,14 @@ LLM → SCORM → Chamilo Pipeline — CLI.
     # Из готового JSON
     python main.py --input examples/sample_course.json
 
-    # С указанием выходного файла
-    python main.py --input examples/sample_course.json --output my_course.zip
-
-    # Генерация через LLM (требуется OPENAI_API_KEY)
+    # Генерация через OpenAI API
     python main.py --topic "Основы Python" --pages 5
 
-    # Генерация на английском
-    python main.py --topic "Machine Learning Basics" --pages 4 --lang en
+    # Генерация через локальную модель (Ollama)
+    python main.py --topic "Docker" --base-url http://192.168.1.100:11434/v1 --model llama3
+
+    # Генерация через LM Studio
+    python main.py --topic "SQL" --base-url http://192.168.1.100:1234/v1 --model local-model
 """
 
 import argparse
@@ -35,10 +35,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Примеры:
+  # Из готового JSON
   python main.py --input examples/sample_course.json
   python main.py --input data.json --output course.zip
+
+  # OpenAI API
   python main.py --topic "Основы SQL" --pages 4
-  python main.py --topic "Docker basics" --pages 3 --lang en
+
+  # Локальные модели (Ollama, LM Studio, vLLM)
+  python main.py --topic "Docker" --base-url http://192.168.1.100:11434/v1 --model llama3
+  python main.py --topic "SQL" --base-url http://192.168.1.100:1234/v1 --model local-model
         """,
     )
 
@@ -82,7 +88,12 @@ def main():
     parser.add_argument(
         "--model",
         metavar="MODEL",
-        help="Модель OpenAI (по умолчанию: gpt-4o-mini)",
+        help="Модель LLM (по умолчанию: gpt-4o-mini; для Ollama: llama3, mistral и т.д.)",
+    )
+    parser.add_argument(
+        "--base-url",
+        metavar="URL",
+        help="URL сервера LLM для локальных моделей (напр.: http://192.168.1.100:11434/v1)",
     )
 
     args = parser.parse_args()
@@ -90,6 +101,7 @@ def main():
     generator = LLMCourseGenerator(
         api_key=args.api_key,
         model=args.model,
+        base_url=getattr(args, 'base_url', None),
     )
 
     # ------------------------------------------------------------------

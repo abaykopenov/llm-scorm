@@ -3,6 +3,9 @@
 
 Для работы с OpenAI API установите переменную окружения OPENAI_API_KEY
 или передайте ключ напрямую в LLMCourseGenerator.
+
+Для локальных моделей (Ollama, LM Studio, vLLM) установите OPENAI_BASE_URL
+на адрес вашего сервера, например: http://192.168.1.100:11434/v1
 """
 
 import os
@@ -11,6 +14,7 @@ import os
 # LLM Configuration
 # ==============================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")  # Для локальных моделей
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "4096"))
