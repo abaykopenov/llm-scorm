@@ -6,10 +6,13 @@ Chamilo LMS Uploader — автоматическая загрузка SCORM-п�
 2. Создание Learning Path с импортом SCORM
 """
 
+import logging
 import os
 import re
 
 import config
+
+logger = logging.getLogger(__name__)
 
 try:
     import requests
@@ -63,7 +66,7 @@ class ChamiloUploader:
         if not os.path.isfile(scorm_zip_path):
             raise FileNotFoundError(f"SCORM-файл не найден: {scorm_zip_path}")
 
-        print(f"🌐 Подключение к Chamilo: {self.chamilo_url}")
+        logger.info("🌐 Подключение к Chamilo: %s", self.chamilo_url)
 
         # 1. Создаём сессию и логинимся
         self.session = requests.Session()
@@ -78,20 +81,20 @@ class ChamiloUploader:
         if not course_code:
             course_code = self._get_first_course()
             if not course_code:
-                print("❌ Не найдено ни одного курса в Chamilo.")
-                print("   Создайте курс вручную и укажите его код через --chamilo-course")
+                logger.error("❌ Не найдено ни одного курса в Chamilo.")
+                logger.error("   Создайте курс вручную и укажите его код через --chamilo-course")
                 return False
 
-        print(f"📚 Курс: {course_code}")
+        logger.info("📚 Курс: %s", course_code)
 
         # 3. Загружаем SCORM
         success = self._upload_scorm(scorm_zip_path, course_code)
 
         if success:
-            print(f"✅ SCORM загружен в Chamilo!")
-            print(f"   Откройте: {self.chamilo_url}/courses/{course_code}/index.php")
+            logger.info("✅ SCORM загружен в Chamilo!")
+            logger.info("   Откройте: %s/courses/%s/index.php", self.chamilo_url, course_code)
         else:
-            print("❌ Ошибка загрузки SCORM в Chamilo.")
+            logger.error("❌ Ошибка загрузки SCORM в Chamilo.")
 
         return success
 
@@ -101,7 +104,7 @@ class ChamiloUploader:
 
     def _login(self) -> bool:
         """Авторизация в Chamilo через веб-форму."""
-        print(f"🔐 Авторизация как: {self.username}")
+        logger.info("🔐 Авторизация как: %s", self.username)
 
         # Получаем страницу логина для CSRF token
         login_page_url = f"{self.chamilo_url}/index.php"
@@ -109,7 +112,7 @@ class ChamiloUploader:
             resp = self.session.get(login_page_url, timeout=15)
             resp.raise_for_status()
         except requests.RequestException as e:
-            print(f"❌ Не удалось подключиться к Chamilo: {e}")
+            logger.error("❌ Не удалось подключиться к Chamilo: %s", e)
             return False
 
         # Ищем CSRF/security token
@@ -145,15 +148,15 @@ class ChamiloUploader:
 
         # Проверяем успешность логина
         if "logout" in resp.text.lower() or "user_portal" in resp.url:
-            print("✅ Авторизация успешна")
+            logger.info("✅ Авторизация успешна")
             return True
 
         # Альтернативная проверка
         if self.username.lower() in resp.text.lower():
-            print("✅ Авторизация успешна")
+            logger.info("✅ Авторизация успешна")
             return True
 
-        print("❌ Не удалось авторизоваться. Проверьте логин и пароль.")
+        logger.error("❌ Не удалось авторизоваться. Проверьте логин и пароль.")
         return False
 
     # ------------------------------------------------------------------
@@ -211,12 +214,12 @@ class ChamiloUploader:
             f"&gradebook=0&origin=&curdirpath=/&tool=learnpath"
         )
 
-        print(f"📤 Загрузка файла: {os.path.basename(scorm_zip_path)}")
+        logger.info("📤 Загрузка файла: %s", os.path.basename(scorm_zip_path))
 
         try:
             resp = self.session.get(form_url, timeout=15)
         except requests.RequestException as e:
-            print(f"❌ Ошибка доступа к странице импорта: {e}")
+            logger.error("❌ Ошибка доступа к странице импорта: %s", e)
             return False
 
         # Ищем action формы (URL куда отправлять)
@@ -242,7 +245,7 @@ class ChamiloUploader:
                 f"&gradebook=0&origin="
             )
 
-        print(f"   URL: {upload_url}")
+        logger.debug("   URL: %s", upload_url)
 
         # Ищем скрытые поля формы
         hidden_fields = {}
@@ -259,7 +262,7 @@ class ChamiloUploader:
         ):
             hidden_fields[m.group(2)] = m.group(1)
 
-        print(f"   Форма: {list(hidden_fields.keys())}")
+        logger.debug("   Форма: %s", list(hidden_fields.keys()))
 
         # Загружаем файл
         filename = os.path.basename(scorm_zip_path)
@@ -288,10 +291,10 @@ class ChamiloUploader:
                     allow_redirects=True,
                 )
         except requests.RequestException as e:
-            print(f"❌ Ошибка загрузки: {e}")
+            logger.error("❌ Ошибка загрузки: %s", e)
             return False
 
-        print(f"   HTTP {resp.status_code}, URL: {resp.url}")
+        logger.debug("   HTTP %s, URL: %s", resp.status_code, resp.url)
 
         # Проверяем результат
         text_lower = resp.text.lower()
@@ -300,7 +303,7 @@ class ChamiloUploader:
         if resp.status_code in (200, 302):
             # Успешный импорт: в ответе есть информация о новом LP
             if "lp_controller.php" in resp.url:
-                print("   ✅ Редирект на Learning Path — загрузка успешна")
+                logger.info("   ✅ Редирект на Learning Path — загрузка успешна")
                 return True
             if "scorm" in text_lower and ("success" in text_lower or "import" in text_lower):
                 return True
@@ -317,14 +320,14 @@ class ChamiloUploader:
 
             if not has_error and resp.status_code == 200:
                 # Вероятно успех — страница загрузилась без ошибок
-                print("   ✅ Страница без ошибок — загрузка вероятно успешна")
+                logger.info("   ✅ Страница без ошибок — загрузка вероятно успешна")
                 return True
 
-        print(f"   ❌ Неожиданный ответ (HTTP {resp.status_code})")
+        logger.error("   ❌ Неожиданный ответ (HTTP %s)", resp.status_code)
         # Save debug info
         debug_path = os.path.join(os.path.dirname(__file__), "_upload_debug.html")
         with open(debug_path, "w", encoding="utf-8") as f:
             f.write(resp.text)
-        print(f"   Ответ сохранён: {debug_path}")
+        logger.debug("   Ответ сохранён: %s", debug_path)
         return False
 

@@ -7,12 +7,16 @@ Chamilo LMS Installer — Web UI для установки Chamilo на удал
 """
 
 import json
+import logging
 import os
+import re
 import sys
 import threading
 import time
 
 from flask import Flask, jsonify, request, send_from_directory
+
+logger = logging.getLogger(__name__)
 
 # Fix Windows console
 if hasattr(sys.stdout, "reconfigure"):
@@ -21,6 +25,31 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 app = Flask(__name__, static_folder="static_installer", static_url_path="/static")
+
+
+def _sanitize_db_param(value: str, param_name: str = "parameter") -> str:
+    """Валидация параметров БД против SQL-инъекций (#1).
+
+    Разрешены только буквы, цифры и подчёркивания.
+    """
+    if not re.match(r'^[a-zA-Z0-9_]+$', value):
+        raise ValueError(
+            f"Недопустимые символы в {param_name}: '{value}'. "
+            f"Разрешены только буквы, цифры и подчёркивания."
+        )
+    return value
+
+
+def _sanitize_db_password(value: str) -> str:
+    """Экранирование пароля БД для безопасной передачи в shell (#1)."""
+    # Убираем символы, которые могут сломать shell-команду
+    dangerous = set('\'"`;|&$(){}[]\\\n\r')
+    if any(c in dangerous for c in value):
+        raise ValueError(
+            "Пароль БД содержит недопустимые символы. "
+            "Используйте буквы, цифры и символы: !@#%^*-_+=.,?"
+        )
+    return value
 
 # In-memory state
 _state = {
@@ -143,6 +172,18 @@ def _run_install(data):
         admin_pass = data.get("admin_pass", "admin123")
         admin_email = data.get("admin_email", "admin@example.com")
         platform_lang = data.get("platform_lang", "russian")
+
+        # Валидация параметров БД (#1 — защита от SQL-инъекций)
+        try:
+            db_name = _sanitize_db_param(db_name, "db_name")
+            db_user = _sanitize_db_param(db_user, "db_user")
+            db_pass = _sanitize_db_password(db_pass)
+            admin_login = _sanitize_db_param(admin_login, "admin_login")
+        except ValueError as e:
+            _log(f"❌ {e}")
+            _state["status"] = "error"
+            _state["installing"] = False
+            return
 
         _log(f"🔗 Подключение к {host}...")
         _state["progress"] = 5

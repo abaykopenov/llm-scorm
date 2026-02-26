@@ -8,14 +8,20 @@ SCORM 1.2 Builder — генерация SCORM-пакета из JSON-струк
 - scorm_api.js     — JS-обёртка SCORM API
 """
 
+import logging
 import os
+import re
 import zipfile
 import xml.etree.ElementTree as ET
-from xml.dom import minidom
 
 from jinja2 import Environment, FileSystemLoader
 
 import config
+
+logger = logging.getLogger(__name__)
+
+# Jinja2 Environment cache (#11)
+_env_cache: dict[str, Environment] = {}
 
 
 class SCORMBuilder:
@@ -23,10 +29,14 @@ class SCORMBuilder:
 
     def __init__(self, templates_dir: str | None = None):
         self.templates_dir = templates_dir or config.TEMPLATES_DIR
-        self.env = Environment(
-            loader=FileSystemLoader(self.templates_dir),
-            autoescape=False,
-        )
+
+        # Cache Environment per templates_dir (#11)
+        if self.templates_dir not in _env_cache:
+            _env_cache[self.templates_dir] = Environment(
+                loader=FileSystemLoader(self.templates_dir),
+                autoescape=False,
+            )
+        self.env = _env_cache[self.templates_dir]
 
     # ------------------------------------------------------------------
     # Публичные методы
@@ -68,11 +78,11 @@ class SCORMBuilder:
 
         self._create_zip(files, output_path)
 
-        print(f"✅ SCORM-пакет создан: {output_path}")
+        logger.info("SCORM package created: %s", output_path)
         return output_path
 
     # ------------------------------------------------------------------
-    # Генерация imsmanifest.xml
+    # Генерация imsmanifest.xml (#10 — ET.indent instead of minidom)
     # ------------------------------------------------------------------
 
     def _generate_manifest(self, course: dict) -> str:
@@ -147,19 +157,10 @@ class SCORMBuilder:
             f = ET.SubElement(resource, "file")
             f.set("href", fname)
 
-        # Format XML
-        rough = ET.tostring(manifest, encoding="unicode", xml_declaration=False)
-        dom = minidom.parseString(rough)
-        pretty = dom.toprettyxml(indent="  ", encoding=None)
-
-        # Remove extra XML declaration from toprettyxml if present
-        lines = pretty.split("\n")
-        if lines[0].startswith("<?xml"):
-            lines[0] = '<?xml version="1.0" encoding="UTF-8"?>'
-        else:
-            lines.insert(0, '<?xml version="1.0" encoding="UTF-8"?>')
-
-        return "\n".join(lines)
+        # Format XML (#10 — ET.indent instead of minidom)
+        ET.indent(manifest, space="  ")
+        xml_str = ET.tostring(manifest, encoding="unicode", xml_declaration=False)
+        return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_str
 
     # ------------------------------------------------------------------
     # Рендеринг HTML
@@ -213,7 +214,6 @@ class SCORMBuilder:
             elif char in " \t":
                 result.append("-")
         slug = "".join(result)
-        # Collapse multiple hyphens
-        while "--" in slug:
-            slug = slug.replace("--", "-")
+        # Collapse multiple hyphens (#9 — re.sub instead of while loop)
+        slug = re.sub(r'-{2,}', '-', slug)
         return slug.strip("-") or "course"

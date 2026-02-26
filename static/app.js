@@ -162,7 +162,7 @@ async function loadChamiloCourses() {
 }
 
 // ═══════════════════════════════════════════
-//  Course Generation
+//  Course Generation (#4 — async with polling)
 // ═══════════════════════════════════════════
 
 async function generateCourse() {
@@ -176,12 +176,13 @@ async function generateCourse() {
     btn.disabled = true;
     btn.innerHTML = '⏳ Генерация...';
 
-    showProgress('Генерация курса через ИИ... Это может занять 1-3 минуты.');
+    showProgress('Запуск генерации...');
 
     const settings = getSettings();
 
     try {
-        const result = await api('/api/generate', {
+        // Step 1: Start async generation
+        const startResult = await api('/api/generate', {
             topic,
             pages: document.getElementById('pages').value,
             lang: document.getElementById('lang').value,
@@ -197,15 +198,29 @@ async function generateCourse() {
             extra_instructions: document.getElementById('extra-instructions').value.trim(),
         });
 
+        if (!startResult.ok) {
+            hideProgress();
+            showMsg('action-msg', '❌ ' + startResult.error, 'fail');
+            btn.disabled = false;
+            btn.innerHTML = '🤖 Сгенерировать';
+            return;
+        }
+
+        // Step 2: Poll for status (#12 — real progress)
+        const taskId = startResult.task_id;
+        const pollResult = await pollGeneration(taskId);
+
         hideProgress();
 
-        if (result.ok) {
-            lastCourse = result.course;
-            renderPreview(result.course);
-            // Auto-build SCORM
-            await buildSCORM();
+        if (pollResult && pollResult.status === 'done') {
+            lastCourse = pollResult.course;
+            lastScormFilename = pollResult.scorm_filename;
+            renderPreview(pollResult.course);
+            showMsg('action-msg', '✅ SCORM создан: ' + pollResult.scorm_filename, 'ok');
+        } else if (pollResult && pollResult.status === 'error') {
+            showMsg('action-msg', '❌ ' + (pollResult.error || 'Ошибка генерации'), 'fail');
         } else {
-            showMsg('action-msg', '❌ ' + result.error, 'fail');
+            showMsg('action-msg', '❌ Ошибка генерации', 'fail');
         }
     } catch (e) {
         hideProgress();
@@ -214,6 +229,38 @@ async function generateCourse() {
 
     btn.disabled = false;
     btn.innerHTML = '🤖 Сгенерировать';
+}
+
+/**
+ * Poll generation status until done/error (#4, #12)
+ */
+async function pollGeneration(taskId) {
+    const maxAttempts = 300; // 10 minutes max (300 * 2s)
+    for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        try {
+            const status = await api(`/api/generate-status/${taskId}`);
+
+            if (status.ok) {
+                // Update real progress bar (#12)
+                updateProgressBar(status.progress, status.status_text);
+
+                if (status.status === 'done') {
+                    return status;
+                } else if (status.status === 'error') {
+                    return status;
+                }
+                // else: still running, continue polling
+            } else {
+                return { status: 'error', error: status.error || 'Ошибка' };
+            }
+        } catch (e) {
+            // Network error during polling — keep trying
+            console.warn('Poll error:', e);
+        }
+    }
+    return { status: 'error', error: 'Превышено время ожидания' };
 }
 
 function loadJSON(input) {
@@ -409,19 +456,21 @@ function showProgress(text) {
     const section = document.getElementById('progress-section');
     section.style.display = '';
     document.getElementById('progress-text').textContent = text;
+    document.getElementById('gen-progress').style.width = '5%';
+}
 
-    // Animate progress
+/**
+ * Update progress bar with real values from server (#12)
+ */
+function updateProgressBar(percent, statusText) {
     const bar = document.getElementById('gen-progress');
-    bar.style.width = '10%';
-    let w = 10;
-    window._progressInterval = setInterval(() => {
-        w = Math.min(w + Math.random() * 5, 90);
-        bar.style.width = w + '%';
-    }, 2000);
+    bar.style.width = Math.min(percent, 100) + '%';
+    if (statusText) {
+        document.getElementById('progress-text').textContent = statusText;
+    }
 }
 
 function hideProgress() {
-    clearInterval(window._progressInterval);
     const bar = document.getElementById('gen-progress');
     bar.style.width = '100%';
     setTimeout(() => {

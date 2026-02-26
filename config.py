@@ -8,7 +8,10 @@
 на адрес вашего сервера, например: http://192.168.1.100:11434/v1
 """
 
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 # Загрузка .env файла (если есть)
 try:
@@ -54,3 +57,31 @@ CHAMILO_URL = os.getenv("CHAMILO_URL", "")           # http://192.168.1.50/chami
 CHAMILO_USER = os.getenv("CHAMILO_USER", "admin")
 CHAMILO_PASSWORD = os.getenv("CHAMILO_PASSWORD", "")
 CHAMILO_API_KEY = os.getenv("CHAMILO_API_KEY", "")
+
+
+# ==============================
+# Thread-safe config reload (#3)
+# ==============================
+def get_config() -> dict:
+    """Потокобезопасное перечитывание конфигурации из .env.
+
+    Вместо importlib.reload(config) каждый вызов создаёт
+    новый dict с актуальными значениями из .env файла.
+    """
+    try:
+        from dotenv import load_dotenv as _load
+        _load(override=True)
+    except ImportError:
+        pass
+
+    return {
+        "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
+        "OPENAI_BASE_URL": os.getenv("OPENAI_BASE_URL", ""),
+        "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "OPENAI_TEMPERATURE": float(os.getenv("OPENAI_TEMPERATURE", "0.7")),
+        "OPENAI_MAX_TOKENS": int(os.getenv("OPENAI_MAX_TOKENS", "4096")),
+        "CHAMILO_URL": os.getenv("CHAMILO_URL", ""),
+        "CHAMILO_USER": os.getenv("CHAMILO_USER", "admin"),
+        "CHAMILO_PASSWORD": os.getenv("CHAMILO_PASSWORD", ""),
+        "CHAMILO_API_KEY": os.getenv("CHAMILO_API_KEY", ""),
+    }

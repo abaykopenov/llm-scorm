@@ -7,11 +7,16 @@ LLM → SCORM → Chamilo Pipeline — Web UI.
 """
 
 import json
+import logging
 import os
 import sys
 import threading
+import uuid
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
+from werkzeug.utils import secure_filename
+
+import config
 
 # ─── Fix Windows console encoding ───
 if hasattr(sys.stdout, "reconfigure"):
@@ -19,14 +24,19 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+# ─── Logging (#16) ───
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
 # In-memory state
 _state = {
     "last_course_json": None,
     "last_scorm_path": None,
-    "generating": False,
 }
+
+# Async tasks store (#4)
+_tasks = {}
 
 
 # ═══════════════════════════════════════════
@@ -39,24 +49,21 @@ def index():
 
 
 # ═══════════════════════════════════════════
-#  Settings
+#  Settings (#3 — thread-safe config)
 # ═══════════════════════════════════════════
 
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
     """Return current .env settings (passwords masked)."""
-    import config
-    # Force reload
-    from importlib import reload
-    reload(config)
+    cfg = config.get_config()
 
     return jsonify({
-        "chamilo_url": config.CHAMILO_URL,
-        "chamilo_user": config.CHAMILO_USER,
-        "chamilo_password": "••••" if config.CHAMILO_PASSWORD else "",
-        "llm_base_url": config.OPENAI_BASE_URL,
-        "llm_model": config.OPENAI_MODEL,
-        "llm_api_key": "••••" if config.OPENAI_API_KEY else "",
+        "chamilo_url": cfg["CHAMILO_URL"],
+        "chamilo_user": cfg["CHAMILO_USER"],
+        "chamilo_password": "••••" if cfg["CHAMILO_PASSWORD"] else "",
+        "llm_base_url": cfg["OPENAI_BASE_URL"],
+        "llm_model": cfg["OPENAI_MODEL"],
+        "llm_api_key": "••••" if cfg["OPENAI_API_KEY"] else "",
     })
 
 
@@ -93,6 +100,7 @@ def save_settings():
     except ImportError:
         pass
 
+    logger.info("Settings saved to .env")
     return jsonify({"ok": True})
 
 
@@ -104,12 +112,10 @@ def save_settings():
 def test_chamilo():
     """Test Chamilo LMS connection and login."""
     data = request.json
-    import config
-    from importlib import reload
-    reload(config)
-    url = (data.get("url", "") or config.CHAMILO_URL).rstrip("/")
-    user = data.get("user", "") or config.CHAMILO_USER or "admin"
-    password = data.get("password", "") or config.CHAMILO_PASSWORD
+    cfg = config.get_config()
+    url = (data.get("url", "") or cfg["CHAMILO_URL"]).rstrip("/")
+    user = data.get("user", "") or cfg["CHAMILO_USER"] or "admin"
+    password = data.get("password", "") or cfg["CHAMILO_PASSWORD"]
 
     if not url:
         return jsonify({"ok": False, "error": "URL не указан"})
@@ -137,6 +143,7 @@ def test_chamilo():
             return jsonify({"ok": False, "error": "Неверный логин/пароль"})
 
     except Exception as e:
+        logger.warning("Chamilo test failed: %s", e)
         return jsonify({"ok": False, "error": str(e)[:200]})
 
 
@@ -190,20 +197,19 @@ def test_llm():
             return jsonify({"ok": True, "message": "OpenAI API подключен"})
 
     except Exception as e:
+        logger.warning("LLM test failed: %s", e)
         return jsonify({"ok": False, "error": str(e)[:200]})
 
 
 @app.route("/api/chamilo-courses", methods=["POST"])
 def chamilo_courses():
     """Get list of courses from Chamilo."""
-    import config
-    from importlib import reload
-    reload(config)
+    cfg = config.get_config()
 
     data = request.json
-    url = (data.get("url", "") or config.CHAMILO_URL).rstrip("/")
-    user = data.get("user", "") or config.CHAMILO_USER or "admin"
-    password = data.get("password", "") or config.CHAMILO_PASSWORD
+    url = (data.get("url", "") or cfg["CHAMILO_URL"]).rstrip("/")
+    user = data.get("user", "") or cfg["CHAMILO_USER"] or "admin"
+    password = data.get("password", "") or cfg["CHAMILO_PASSWORD"]
 
     if not url:
         return jsonify({"ok": False, "courses": []})
@@ -230,75 +236,141 @@ def chamilo_courses():
         return jsonify({"ok": True, "courses": courses})
 
     except Exception as e:
+        logger.warning("Chamilo courses fetch failed: %s", e)
         return jsonify({"ok": False, "courses": [], "error": str(e)[:200]})
 
 
 # ═══════════════════════════════════════════
-#  Course Generation
+#  Course Generation (#4 — async)
 # ═══════════════════════════════════════════
 
-@app.route("/api/generate", methods=["POST"])
-def generate_course():
-    """Generate course via LLM."""
-    if _state["generating"]:
-        return jsonify({"ok": False, "error": "Генерация уже запущена"})
-
-    data = request.json
-    topic = data.get("topic", "")
-    pages = int(data.get("pages", 3))
-    lang = data.get("lang", "ru")
-    base_url = data.get("base_url", "")
-    model = data.get("model", "")
-    api_key = data.get("api_key", "")
-
-    # Advanced settings
-    temperature = float(data.get("temperature", 0.7))
-    max_tokens = int(data.get("max_tokens", 4096))
-    blocks_per_page = int(data.get("blocks_per_page", 3))
-    questions_per_page = int(data.get("questions_per_page", 1))
-    detail_level = data.get("detail_level", "normal")
-    system_prompt = data.get("system_prompt", "")
-    extra_instructions = data.get("extra_instructions", "")
-
-    if not topic:
-        return jsonify({"ok": False, "error": "Укажите тему курса"})
-
-    _state["generating"] = True
-
+def _generate_bg(task_id: str, params: dict):
+    """Background thread for course generation."""
+    task = _tasks[task_id]
     try:
+        task["progress"] = 5
+        task["status_text"] = "Подключение к LLM..."
+
         from llm_generator import LLMCourseGenerator
         generator = LLMCourseGenerator(
-            api_key=api_key or None,
-            model=model or None,
-            base_url=base_url or None,
+            api_key=params.get("api_key") or None,
+            model=params.get("model") or None,
+            base_url=params.get("base_url") or None,
         )
+
+        task["progress"] = 15
+        task["status_text"] = "Генерация курса через ИИ..."
 
         course = generator.generate_course(
-            topic=topic,
-            num_pages=pages,
-            language=lang,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            blocks_per_page=blocks_per_page,
-            questions_per_page=questions_per_page,
-            detail_level=detail_level,
-            system_prompt=system_prompt or None,
-            extra_instructions=extra_instructions or None,
+            topic=params["topic"],
+            num_pages=params.get("pages", 3),
+            language=params.get("lang", "ru"),
+            temperature=params.get("temperature", 0.7),
+            max_tokens=params.get("max_tokens", 4096),
+            blocks_per_page=params.get("blocks_per_page", 3),
+            questions_per_page=params.get("questions_per_page", 1),
+            detail_level=params.get("detail_level", "normal"),
+            system_prompt=params.get("system_prompt") or None,
+            extra_instructions=params.get("extra_instructions") or None,
         )
 
-        _state["last_course_json"] = course
-        _state["generating"] = False
+        task["progress"] = 70
+        task["status_text"] = "Сборка SCORM-пакета..."
 
-        return jsonify({"ok": True, "course": course})
+        # Auto-build SCORM
+        from scorm_builder import SCORMBuilder
+        builder = SCORMBuilder()
+        scorm_path = builder.build(course)
+
+        task["progress"] = 100
+        task["status_text"] = "Готово!"
+        task["status"] = "done"
+        task["course"] = course
+        task["scorm_path"] = scorm_path
+        task["scorm_filename"] = os.path.basename(scorm_path)
+
+        # Update global state for backward compat
+        _state["last_course_json"] = course
+        _state["last_scorm_path"] = scorm_path
+
+        logger.info("Course generated: %s", course.get("title", "?"))
 
     except Exception as e:
-        _state["generating"] = False
+        task["status"] = "error"
+        task["progress"] = 0
         err = str(e)
         if "insufficient_quota" in err:
             err = "Квота OpenAI исчерпана. Проверьте баланс."
         elif "Connection" in err or "connect" in err.lower():
             err = "Не удалось подключиться к LLM-серверу."
-        return jsonify({"ok": False, "error": err[:300]})
+        task["error"] = err[:300]
+        task["status_text"] = "Ошибка"
+        logger.error("Course generation failed: %s", e)
+
+
+@app.route("/api/generate", methods=["POST"])
+def generate_course():
+    """Generate course via LLM (async, returns task_id)."""
+    data = request.json
+    topic = data.get("topic", "")
+
+    if not topic:
+        return jsonify({"ok": False, "error": "Укажите тему курса"})
+
+    task_id = str(uuid.uuid4())
+    _tasks[task_id] = {
+        "status": "running",
+        "progress": 0,
+        "status_text": "Запуск...",
+        "course": None,
+        "scorm_path": None,
+        "scorm_filename": None,
+        "error": None,
+    }
+
+    params = {
+        "topic": topic,
+        "pages": int(data.get("pages", 3)),
+        "lang": data.get("lang", "ru"),
+        "base_url": data.get("base_url", ""),
+        "model": data.get("model", ""),
+        "api_key": data.get("api_key", ""),
+        "temperature": float(data.get("temperature", 0.7)),
+        "max_tokens": int(data.get("max_tokens", 4096)),
+        "blocks_per_page": int(data.get("blocks_per_page", 3)),
+        "questions_per_page": int(data.get("questions_per_page", 1)),
+        "detail_level": data.get("detail_level", "normal"),
+        "system_prompt": data.get("system_prompt", ""),
+        "extra_instructions": data.get("extra_instructions", ""),
+    }
+
+    thread = threading.Thread(target=_generate_bg, args=(task_id, params), daemon=True)
+    thread.start()
+
+    return jsonify({"ok": True, "task_id": task_id})
+
+
+@app.route("/api/generate-status/<task_id>")
+def generate_status(task_id):
+    """Poll generation task status (#4)."""
+    task = _tasks.get(task_id)
+    if not task:
+        return jsonify({"ok": False, "error": "Задача не найдена"}), 404
+
+    result = {
+        "ok": True,
+        "status": task["status"],
+        "progress": task["progress"],
+        "status_text": task["status_text"],
+    }
+
+    if task["status"] == "done":
+        result["course"] = task["course"]
+        result["scorm_filename"] = task["scorm_filename"]
+    elif task["status"] == "error":
+        result["error"] = task["error"]
+
+    return jsonify(result)
 
 
 @app.route("/api/generate-from-json", methods=["POST"])
@@ -334,15 +406,14 @@ def build_scorm():
         return jsonify({"ok": True, "path": path, "filename": filename})
 
     except Exception as e:
+        logger.error("SCORM build failed: %s", e)
         return jsonify({"ok": False, "error": str(e)[:300]})
 
 
 @app.route("/api/upload", methods=["POST"])
 def upload_to_chamilo():
     """Upload SCORM to Chamilo."""
-    import config
-    from importlib import reload
-    reload(config)
+    cfg = config.get_config()
 
     data = request.json
     scorm_path = _state.get("last_scorm_path")
@@ -354,9 +425,9 @@ def upload_to_chamilo():
     try:
         from chamilo_uploader import ChamiloUploader
         uploader = ChamiloUploader(
-            chamilo_url=data.get("chamilo_url") or config.CHAMILO_URL,
-            username=data.get("chamilo_user") or config.CHAMILO_USER,
-            password=data.get("chamilo_password") or config.CHAMILO_PASSWORD,
+            chamilo_url=data.get("chamilo_url") or cfg["CHAMILO_URL"],
+            username=data.get("chamilo_user") or cfg["CHAMILO_USER"],
+            password=data.get("chamilo_password") or cfg["CHAMILO_PASSWORD"],
         )
         success = uploader.upload(scorm_path, course_code or None)
         if success:
@@ -365,17 +436,19 @@ def upload_to_chamilo():
             return jsonify({"ok": False, "error": "Не удалось загрузить. Попробуйте вручную."})
 
     except Exception as e:
+        logger.error("Chamilo upload failed: %s", e)
         return jsonify({"ok": False, "error": str(e)[:300]})
 
 
 @app.route("/api/download/<filename>")
 def download_file(filename):
-    """Download generated SCORM ZIP."""
-    import config
-    path = os.path.join(config.OUTPUT_DIR, filename)
-    if os.path.isfile(path):
-        return send_file(path, as_attachment=True)
-    return jsonify({"error": "File not found"}), 404
+    """Download generated SCORM ZIP (#17 — secure_filename)."""
+    filename = secure_filename(filename)
+    if not filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    return send_from_directory(
+        config.OUTPUT_DIR, filename, as_attachment=True
+    )
 
 
 # ═══════════════════════════════════════════
@@ -383,8 +456,10 @@ def download_file(filename):
 # ═══════════════════════════════════════════
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("🚀 LLM → SCORM → Chamilo — Web UI")
-    print("   http://localhost:5000")
-    print("=" * 50)
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    logger.info("=" * 50)
+    logger.info("🚀 LLM → SCORM → Chamilo — Web UI")
+    logger.info("   http://localhost:5000")
+    logger.info("=" * 50)
     app.run(host="0.0.0.0", port=5000, debug=True)

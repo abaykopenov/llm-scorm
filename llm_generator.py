@@ -44,10 +44,16 @@ LLM Course Generator — генерация JSON-структуры курса �
 }
 """
 
+import hashlib
 import json
+import logging
 import os
+import re
+import time
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 class LLMCourseGenerator:
@@ -58,6 +64,32 @@ class LLMCourseGenerator:
         self.api_key = api_key or config.OPENAI_API_KEY
         self.base_url = base_url or config.OPENAI_BASE_URL or None
         self.model = model or config.OPENAI_MODEL
+
+        # Lazy client (#8)
+        self._client = None
+        # Cached flag for json_object support (#7)
+        self._supports_json_format = None
+
+    # ------------------------------------------------------------------
+    # Lazy OpenAI client (#8)
+    # ------------------------------------------------------------------
+
+    @property
+    def client(self):
+        """Ленивая инициализация OpenAI клиента — переиспользуется."""
+        if self._client is None:
+            from openai import OpenAI
+
+            kwargs = {}
+            if self.base_url:
+                kwargs["base_url"] = self.base_url
+                kwargs["api_key"] = self.api_key or "local"
+                logger.info("LLM server: %s", self.base_url)
+            else:
+                kwargs["api_key"] = self.api_key
+
+            self._client = OpenAI(**kwargs)
+        return self._client
 
     # ------------------------------------------------------------------
     # Публичные методы
@@ -111,20 +143,6 @@ class LLMCourseGenerator:
         )
 
         try:
-            from openai import OpenAI
-
-            # Настройка клиента: OpenAI API или локальная модель
-            client_kwargs = {}
-            if self.base_url:
-                client_kwargs["base_url"] = self.base_url
-                # Для локальных моделей API key может быть любым
-                client_kwargs["api_key"] = self.api_key or "local"
-                print(f"   Сервер: {self.base_url}")
-            else:
-                client_kwargs["api_key"] = self.api_key
-
-            client = OpenAI(**client_kwargs)
-
             # Системный промпт
             sys_prompt = system_prompt or (
                 "Ты — генератор учебных курсов. "
@@ -142,35 +160,61 @@ class LLMCourseGenerator:
                 "max_tokens": max_tokens,
             }
 
-            # json_object mode поддерживается не всеми моделями
-            # (Ollama, vLLM обычно поддерживают, но некоторые — нет)
-            try:
+            # json_object mode — с кэшированием флага (#7)
+            if self._supports_json_format is None:
+                # Первый вызов: пробуем с json_object
+                try:
+                    request_kwargs["response_format"] = {"type": "json_object"}
+                    response = self._call_llm_with_retry(request_kwargs)
+                    self._supports_json_format = True
+                except Exception:
+                    # Fallback: запоминаем что не поддерживается
+                    self._supports_json_format = False
+                    del request_kwargs["response_format"]
+                    response = self._call_llm_with_retry(request_kwargs)
+            elif self._supports_json_format:
                 request_kwargs["response_format"] = {"type": "json_object"}
-                response = client.chat.completions.create(**request_kwargs)
-            except Exception:
-                # Fallback: без response_format
-                del request_kwargs["response_format"]
-                response = client.chat.completions.create(**request_kwargs)
+                response = self._call_llm_with_retry(request_kwargs)
+            else:
+                response = self._call_llm_with_retry(request_kwargs)
 
             raw = response.choices[0].message.content
-
-            # Очистка ответа от возможного markdown обрамления
-            raw = raw.strip()
-            if raw.startswith("```"):
-                # Убираем ```json ... ```
-                lines = raw.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                raw = "\n".join(lines)
-
-            return json.loads(raw)
+            return self._parse_llm_response(raw)
 
         except ImportError:
             raise ImportError(
                 "Пакет openai не установлен. Выполните: pip install openai"
             )
+
+    def generate_course_cached(self, topic: str, num_pages: int | None = None,
+                               language: str | None = None, **kwargs) -> dict:
+        """Генерация курса с кэшированием (#6).
+
+        Если курс с такими же параметрами уже генерировался,
+        возвращает результат из кэша.
+        """
+        num_pages = num_pages or config.DEFAULT_NUM_PAGES
+        language = language or config.DEFAULT_COURSE_LANGUAGE
+
+        key = self._cache_key(topic, num_pages, language, **kwargs)
+        cache_path = os.path.join(config.OUTPUT_DIR, f"cache_{key}.json")
+
+        if os.path.isfile(cache_path):
+            logger.info("Using cached course: %s", cache_path)
+            with open(cache_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+
+        course = self.generate_course(
+            topic=topic, num_pages=num_pages, language=language, **kwargs
+        )
+
+        # Save to cache
+        os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(course, f, ensure_ascii=False, indent=2)
+        logger.info("Course cached: %s", cache_path)
+
+        return course
 
     @staticmethod
     def generate_from_file(path: str) -> dict:
@@ -197,7 +241,97 @@ class LLMCourseGenerator:
         return data
 
     # ------------------------------------------------------------------
-    # Приватные методы
+    # Retry logic (#13)
+    # ------------------------------------------------------------------
+
+    def _call_llm_with_retry(self, request_kwargs: dict,
+                             max_retries: int = 3) -> object:
+        """Вызов LLM с retry и exponential backoff (#13)."""
+        for attempt in range(max_retries):
+            try:
+                return self.client.chat.completions.create(**request_kwargs)
+            except Exception as e:
+                err_str = str(e)
+                is_retryable = (
+                    isinstance(e, (ConnectionError, TimeoutError))
+                    or "429" in err_str
+                    or "500" in err_str
+                    or "502" in err_str
+                    or "503" in err_str
+                    or "connect" in err_str.lower()
+                    or "timeout" in err_str.lower()
+                )
+                if is_retryable and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "LLM attempt %d/%d failed: %s. Retrying in %ds...",
+                        attempt + 1, max_retries, e, wait
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
+
+    # ------------------------------------------------------------------
+    # JSON parsing (#14)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_llm_response(raw: str) -> dict:
+        """Надёжный парсинг JSON-ответа от LLM (#14).
+
+        Обрабатывает: markdown обрамление, trailing commas,
+        вложенный JSON, валидация структуры.
+        """
+        raw = raw.strip()
+
+        # Убираем markdown обрамление
+        raw = re.sub(r'^```(?:json)?\s*\n?', '', raw)
+        raw = re.sub(r'\n?```\s*$', '', raw)
+
+        # Убираем trailing commas (частая ошибка LLM)
+        raw = re.sub(r',\s*([}\]])', r'\1', raw)
+
+        # Пробуем JSON
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            # Ищем первый { и последний }
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            if start >= 0 and end > start:
+                try:
+                    data = json.loads(raw[start:end])
+                except json.JSONDecodeError:
+                    logger.error("Failed to parse LLM response: %s...", raw[:200])
+                    raise ValueError(
+                        "LLM вернул невалидный JSON. Попробуйте повторить генерацию."
+                    )
+            else:
+                logger.error("No JSON found in LLM response: %s...", raw[:200])
+                raise ValueError(
+                    "LLM не вернул JSON-ответ. Попробуйте повторить генерацию."
+                )
+
+        # Валидация структуры
+        if "title" not in data:
+            raise ValueError("LLM не вернул поле 'title'")
+        if "pages" not in data or not isinstance(data["pages"], list):
+            raise ValueError("LLM не вернул массив 'pages'")
+
+        return data
+
+    # ------------------------------------------------------------------
+    # Cache key (#6)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _cache_key(topic: str, num_pages: int, language: str, **kwargs) -> str:
+        """Генерация ключа кэша для курса."""
+        sig = f"{topic}:{num_pages}:{language}:{json.dumps(kwargs, sort_keys=True)}"
+        return hashlib.md5(sig.encode()).hexdigest()[:12]
+
+    # ------------------------------------------------------------------
+    # Prompt builder
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -278,3 +412,31 @@ class LLMCourseGenerator:
 }}
 
 Верни ТОЛЬКО JSON, без пояснений и markdown."""
+
+    # ------------------------------------------------------------------
+    # Slugify (#9 — optimized)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _slugify(text: str) -> str:
+        """Простая транслитерация и slugify для идентификаторов."""
+        translit = {
+            "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e",
+            "ё": "yo", "ж": "zh", "з": "z", "и": "i", "й": "j", "к": "k",
+            "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+            "с": "s", "т": "t", "у": "u", "ф": "f", "х": "kh", "ц": "ts",
+            "ч": "ch", "ш": "sh", "щ": "shch", "ъ": "", "ы": "y",
+            "ь": "", "э": "e", "ю": "yu", "я": "ya",
+        }
+        result = []
+        for char in text.lower():
+            if char in translit:
+                result.append(translit[char])
+            elif char.isascii() and (char.isalnum() or char in "-_"):
+                result.append(char)
+            elif char in " \t":
+                result.append("-")
+        slug = "".join(result)
+        # Collapse multiple hyphens (#9 — re.sub instead of while loop)
+        slug = re.sub(r'-{2,}', '-', slug)
+        return slug.strip("-") or "course"

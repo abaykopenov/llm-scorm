@@ -7,8 +7,11 @@ LLM → SCORM → Chamilo — Desktop Application.
     python desktop_app.py
 """
 
+import logging
 import sys
 import threading
+
+logger = logging.getLogger(__name__)
 
 # Fix Windows console encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -33,6 +36,9 @@ def main():
         print("Ошибка: pywebview не установлен.")
         print("Выполните: pip install pywebview")
         sys.exit(1)
+
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
     print("=" * 50)
     print("🚀 LLM → SCORM → Chamilo — Desktop App")
