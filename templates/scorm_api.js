@@ -164,6 +164,26 @@ var SCORM = (function () {
          */
         isInitialized: function () {
             return initialized;
+        },
+
+        /**
+         * Фиксация детального ответа на вопрос (SCORM interactions)
+         */
+        recordInteraction: function (id, type, response, result) {
+            if (!this.isInitialized()) return;
+            var lmsAPI = getAPI();
+            if (!lmsAPI) return;
+
+            // Получаем индекс следующего взаимодействия
+            var countStr = lmsAPI.LMSGetValue("cmi.interactions._count");
+            var n = parseInt(countStr, 10);
+            if (isNaN(n)) n = 0;
+
+            // Записываем данные
+            lmsAPI.LMSSetValue("cmi.interactions." + n + ".id", String(id));
+            lmsAPI.LMSSetValue("cmi.interactions." + n + ".type", String(type)); // 'choice' или 'true-false'
+            lmsAPI.LMSSetValue("cmi.interactions." + n + ".student_response", String(response));
+            lmsAPI.LMSSetValue("cmi.interactions." + n + ".result", String(result)); // 'correct' или 'wrong'
         }
     };
 })();

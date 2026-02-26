@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - {{ page.title }}</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Специфичные стили для отдельной страницы, чтобы убрать навигационное меню, если нужно, или просто использовать общие */
+        body {
+            padding: 20px;
+        }
+
+        .page-container {
+            display: block;
+        }
+
+        .completion-screen {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app" style="margin: 0; padding: 0;">
+        <main class="main-content" style="margin: 0; padding: 0;">
+            <div class="page-container" id="page-0">
+                <h2 class="page-title">{{ page.title }}</h2>
+
+                {% for block in page.blocks %}
+                {% set block_idx = loop.index0 %}
+                {% set quiz_id = "quiz-0-" ~ block_idx %}
+                {% if block.type == 'text' %}
+                <!-- Text Block -->
+                <div class="block">
+                    <div class="block-title">
+                        <span class="block-icon text-icon">📖</span>
+                        {{ block.title }}
+                    </div>
+                    <div class="block-body">
+                        {{ block.body }}
+                    </div>
+                </div>
+
+                {% elif block.type == 'mcq' %}
+                <!-- MCQ Block -->
+                <div class="block quiz-block" id="{{ quiz_id }}">
+                    <div class="block-title">
+                        <span class="block-icon quiz-icon">❓</span>
+                        {{ block.title }}
+                    </div>
+                    <p class="quiz-question">{{ block.body }}</p>
+                    <div class="quiz-options">
+                        {% for opt in block.options %}
+                        <div class="quiz-option" data-correct="{{ opt.correct | lower }}" data-quiz="{{ quiz_id }}"
+                            onclick="selectOption(this)">
+                            <span class="quiz-radio"></span>
+                            <span>{{ opt.text }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <button class="quiz-submit" disabled onclick="submitQuiz('{{ quiz_id }}', 'mcq')"
+                        id="btn-{{ quiz_id }}">
+                        Проверить ответ
+                    </button>
+                    <div class="quiz-feedback" id="fb-{{ quiz_id }}" data-correct="{{ block.feedback_correct }}"
+                        data-incorrect="{{ block.feedback_incorrect }}">
+                    </div>
+                </div>
+
+                {% elif block.type == 'truefalse' %}
+                <!-- True/False Block -->
+                <div class="block quiz-block" id="{{ quiz_id }}">
+                    <div class="block-title">
+                        <span class="block-icon quiz-icon">✅</span>
+                        {{ block.title }}
+                    </div>
+                    <p class="quiz-question">{{ block.body }}</p>
+                    <div class="tf-options">
+                        <button class="tf-btn" data-value="true"
+                            data-correct="{{ (block.correct_answer == true) | lower }}" data-quiz="{{ quiz_id }}"
+                            onclick="selectTF(this)">
+                            Верно
+                        </button>
+                        <button class="tf-btn" data-value="false"
+                            data-correct="{{ (block.correct_answer == false) | lower }}" data-quiz="{{ quiz_id }}"
+                            onclick="selectTF(this)">
+                            Неверно
+                        </button>
+                    </div>
+                    <button class="quiz-submit" disabled onclick="submitQuiz('{{ quiz_id }}', 'truefalse')"
+                        id="btn-{{ quiz_id }}">
+                        Проверить ответ
+                    </button>
+                    <div class="quiz-feedback" id="fb-{{ quiz_id }}" data-correct="{{ block.feedback_correct }}"
+                        data-incorrect="{{ block.feedback_incorrect }}">
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+
+            <!-- Bottom padding -->
+            <div style="height: 80px;"></div>
+        </main>
+    </div>
+
+    <!-- Завершение страницы для multi-SCO -->
+    <div class="nav-footer">
+        <button class="nav-btn primary" id="btnFinishPage" onclick="finishPage()">
+            Завершить страницу ✓
+        </button>
+    </div>
+
+    <script src="scorm_api.js"></script>
+    <script>
+        (function () {
+            "use strict";
+
+            var quizResults = {};
+            var totalQuizzes = 0;
+            var correctQuizzes = 0;
+
+            // Count total quizzes
+            document.querySelectorAll('.quiz-block').forEach(function () { totalQuizzes++; });
+
+            // Initialize SCORM
+            SCORM.initialize();
+
+            // Если нет квизов, сразу выставляем incomplete, ждем нажатия кнопки "Завершить"
+            SCORM.setLessonStatus("incomplete");
+
+            // ------------------------------------------------------------------
+            // Quiz logic
+            // ------------------------------------------------------------------
+            window.selectOption = function (el) {
+                var quizId = el.getAttribute('data-quiz');
+                if (quizResults[quizId] !== undefined) return;
+
+                var options = el.parentElement.querySelectorAll('.quiz-option');
+                options.forEach(function (o) { o.classList.remove('selected'); });
+                el.classList.add('selected');
+
+                var btn = document.getElementById('btn-' + quizId);
+                if (btn) btn.disabled = false;
+            };
+
+            window.selectTF = function (el) {
+                var quizId = el.getAttribute('data-quiz');
+                if (quizResults[quizId] !== undefined) return;
+
+                var btns = el.parentElement.querySelectorAll('.tf-btn');
+                btns.forEach(function (b) { b.classList.remove('selected'); });
+                el.classList.add('selected');
+
+                var btn = document.getElementById('btn-' + quizId);
+                if (btn) btn.disabled = false;
+            };
+
+            window.submitQuiz = function (quizId, type) {
+                if (quizResults[quizId] !== undefined) return;
+
+                var block = document.getElementById(quizId);
+                var isCorrect = false;
+                var studentResponseStr = '';
+
+                if (type === 'mcq') {
+                    var selected = block.querySelector('.quiz-option.selected');
+                    if (!selected) return;
+                    isCorrect = selected.getAttribute('data-correct') === 'true';
+
+                    // Попытаемся получить текст ответа
+                    studentResponseStr = selected.textContent.trim() || 'Choice';
+
+                    // Mark options
+                    block.querySelectorAll('.quiz-option').forEach(function (o) {
+                        o.classList.add('disabled');
+                        if (o.getAttribute('data-correct') === 'true') {
+                            o.classList.add('correct');
+                        } else if (o === selected && !isCorrect) {
+                            o.classList.add('incorrect');
+                        }
+                    });
+                } else {
+                    var selected = block.querySelector('.tf-btn.selected');
+                    if (!selected) return;
+                    isCorrect = selected.getAttribute('data-correct') === 'true';
+
+                    var val = selected.getAttribute('data-value');
+                    studentResponseStr = val === 'true' ? 't' : 'f';
+
+                    block.querySelectorAll('.tf-btn').forEach(function (b) {
+                        b.classList.add('disabled');
+                        if (b.getAttribute('data-correct') === 'true') {
+                            b.classList.add('correct');
+                        } else if (b === selected && !isCorrect) {
+                            b.classList.add('incorrect');
+                        }
+                    });
+                }
+
+                quizResults[quizId] = isCorrect;
+                if (isCorrect) correctQuizzes++;
+
+                // Отправляем детальки в LMS (interactions)
+                var interactionType = type === 'mcq' ? 'choice' : 'true-false';
+                var interactionResult = isCorrect ? 'correct' : 'wrong';
+                try {
+                    SCORM.recordInteraction(quizId, interactionType, studentResponseStr, interactionResult);
+                } catch (e) {
+                    console.log("[SCORM] error recording interaction:", e);
+                }
+
+                // Feedback
+                var fb = document.getElementById('fb-' + quizId);
+                if (fb) {
+                    fb.textContent = isCorrect ? fb.getAttribute('data-correct') : fb.getAttribute('data-incorrect');
+                    fb.className = 'quiz-feedback show ' + (isCorrect ? 'correct' : 'incorrect');
+                }
+
+                // Disable submit
+                var btn = document.getElementById('btn-' + quizId);
+                if (btn) btn.disabled = true;
+
+                updateScore();
+            };
+
+            function updateScore() {
+                if (totalQuizzes > 0) {
+                    var score = Math.round((correctQuizzes / totalQuizzes) * 100);
+                    SCORM.setScore(score);
+                }
+            }
+
+            // ------------------------------------------------------------------
+            // Completion
+            // ------------------------------------------------------------------
+            window.finishPage = function () {
+                var answered = Object.keys(quizResults).length;
+                if (answered < totalQuizzes) {
+                    alert("Пожалуйста, ответьте на все вопросы перед завершением страницы.");
+                    return;
+                }
+
+                updateScore();
+                SCORM.setLessonStatus("completed");
+                SCORM.commit();
+                SCORM.finish();
+
+                var btn = document.getElementById('btnFinishPage');
+                btn.textContent = "Страница пройдена ✓";
+                btn.disabled = true;
+                btn.classList.remove('primary');
+                btn.classList.add('completed');
+
+                // В Multi-SCO LMS сама управляет навигацией (кнопки Next/Prev в интерфейсе LMS).
+                // Но можно сказать пользователю:
+                alert("Раздел пройден! Вы можете переходить к следующему шагу в меню курса (сбоку или сверху в LMS).");
+            };
+
+            // Cleanup on unload
+            window.addEventListener('beforeunload', function () {
+                SCORM.finish();
+            });
+
+        })();
+    </script>
+</body>
+
+</html>

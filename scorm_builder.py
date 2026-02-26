@@ -60,9 +60,7 @@ class SCORMBuilder:
             os.makedirs(config.OUTPUT_DIR, exist_ok=True)
             output_path = os.path.join(config.OUTPUT_DIR, f"{slug}.zip")
 
-        # Генерация файлов
         manifest_xml = self._generate_manifest(course)
-        html_content = self._render_html(course)
 
         # Чтение статических файлов
         style_css = self._read_template_file("style.css")
@@ -71,10 +69,22 @@ class SCORMBuilder:
         # Упаковка в ZIP
         files = {
             "imsmanifest.xml": manifest_xml,
-            "index.html": html_content,
             "style.css": style_css,
             "scorm_api.js": scorm_js,
         }
+        
+        # Добавляем страницы (Multi-SCO)
+        pages = course.get("pages", [])
+        if not pages:
+            # Fallback для пустого курса
+            files["index.html"] = self._render_html(course)
+        else:
+            for page_idx, page in enumerate(pages):
+                html_content = self._render_page_html(course, page, page_idx)
+                files[f"page_{page_idx + 1}.html"] = html_content
+                
+            # Сохраняем и общий index.html на случай, если кто-то запустит напрямую
+            files["index.html"] = self._render_html(course)
 
         self._create_zip(files, output_path)
 
@@ -131,31 +141,63 @@ class SCORMBuilder:
         org_title = ET.SubElement(org, "title")
         org_title.text = title
 
-        # Single SCO item
-        item = ET.SubElement(org, "item")
-        item.set("identifier", "item-1")
-        item.set("identifierref", "resource-1")
-        item.set("isvisible", "true")
+        # Pages (Multi-SCO)
+        pages = course.get("pages", [])
+        if not pages:
+            # Empty course fallback
+            item = ET.SubElement(org, "item")
+            item.set("identifier", "item-1")
+            item.set("identifierref", "resource-1")
+            item.set("isvisible", "true")
+            
+            item_title = ET.SubElement(item, "title")
+            item_title.text = title
+            
+            mastery = ET.SubElement(item, "adlcp:masteryscore")
+            mastery.text = str(config.SCORM_MASTERY_SCORE)
 
-        item_title = ET.SubElement(item, "title")
-        item_title.text = title
+            resources = ET.SubElement(manifest, "resources")
+            resource = ET.SubElement(resources, "resource")
+            resource.set("identifier", "resource-1")
+            resource.set("type", "webcontent")
+            resource.set("adlcp:scormtype", "sco")
+            resource.set("href", "index.html")
 
-        # adlcp:masteryscore
-        mastery = ET.SubElement(item, "adlcp:masteryscore")
-        mastery.text = str(config.SCORM_MASTERY_SCORE)
-
-        # Resources
-        resources = ET.SubElement(manifest, "resources")
-        resource = ET.SubElement(resources, "resource")
-        resource.set("identifier", "resource-1")
-        resource.set("type", "webcontent")
-        resource.set("adlcp:scormtype", "sco")
-        resource.set("href", "index.html")
-
-        # File entries
-        for fname in ["index.html", "style.css", "scorm_api.js"]:
-            f = ET.SubElement(resource, "file")
-            f.set("href", fname)
+            for fname in ["index.html", "style.css", "scorm_api.js"]:
+                f = ET.SubElement(resource, "file")
+                f.set("href", fname)
+        else:
+            resources = ET.SubElement(manifest, "resources")
+            for page_idx, page in enumerate(pages):
+                page_id = page_idx + 1
+                page_title_text = page.get("title", f"Page {page_id}")
+                
+                # Item
+                item = ET.SubElement(org, "item")
+                item.set("identifier", f"item-{page_id}")
+                item.set("identifierref", f"resource-{page_id}")
+                item.set("isvisible", "true")
+                
+                item_title = ET.SubElement(item, "title")
+                item_title.text = page_title_text
+                
+                mastery = ET.SubElement(item, "adlcp:masteryscore")
+                mastery.text = str(config.SCORM_MASTERY_SCORE)
+                
+                # Resource
+                resource = ET.SubElement(resources, "resource")
+                resource.set("identifier", f"resource-{page_id}")
+                resource.set("type", "webcontent")
+                resource.set("adlcp:scormtype", "sco")
+                resource.set("href", f"page_{page_id}.html")
+                
+                # Files
+                f1 = ET.SubElement(resource, "file")
+                f1.set("href", f"page_{page_id}.html")
+                f2 = ET.SubElement(resource, "file")
+                f2.set("href", "style.css")
+                f3 = ET.SubElement(resource, "file")
+                f3.set("href", "scorm_api.js")
 
         # Format XML (#10 — ET.indent instead of minidom)
         ET.indent(manifest, space="  ")
@@ -167,13 +209,29 @@ class SCORMBuilder:
     # ------------------------------------------------------------------
 
     def _render_html(self, course: dict) -> str:
-        """Рендеринг HTML-страницы из Jinja2 шаблона."""
+        """Рендеринг HTML-страницы из Jinja2 шаблона (Legacy Mono-SCO)."""
         template = self.env.get_template("index.html")
         return template.render(
             title=course.get("title", "Untitled"),
             description=course.get("description", ""),
             language=course.get("language", config.DEFAULT_COURSE_LANGUAGE),
             pages=course.get("pages", []),
+        )
+
+    def _render_page_html(self, course: dict, page: dict, page_idx: int) -> str:
+        """Рендеринг HTML для отдельной страницы (Multi-SCO)."""
+        # Пытаемся использовать page.html, если нет - фоллбэк на index.html
+        try:
+            template = self.env.get_template("page.html")
+        except:
+            return self._render_html(course)
+            
+        return template.render(
+            title=course.get("title", "Untitled"),
+            language=course.get("language", config.DEFAULT_COURSE_LANGUAGE),
+            page=page,
+            page_idx=page_idx,
+            total_pages=len(course.get("pages", [])),
         )
 
     # ------------------------------------------------------------------

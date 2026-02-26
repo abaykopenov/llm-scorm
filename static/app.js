@@ -326,6 +326,7 @@ function renderPreview(course) {
             <div class="page-card${i === 0 ? ' open' : ''}" onclick="this.classList.toggle('open')">
                 <div class="page-card-header">
                     <span class="page-num">${i + 1}</span>
+                    <span title="Отдельный элемент курса (SCO)">📌</span>
                     ${page.title || 'Страница ' + (i + 1)}
                 </div>
                 <div class="page-card-body">${blocks}</div>

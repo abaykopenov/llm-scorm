@@ -284,11 +284,14 @@
 
             var block = document.getElementById(quizId);
             var isCorrect = false;
+            var studentResponseStr = '';
 
             if (type === 'mcq') {
                 var selected = block.querySelector('.quiz-option.selected');
                 if (!selected) return;
                 isCorrect = selected.getAttribute('data-correct') === 'true';
+
+                studentResponseStr = selected.textContent.trim() || 'Choice';
 
                 // Mark options
                 block.querySelectorAll('.quiz-option').forEach(function (o) {
@@ -304,6 +307,9 @@
                 if (!selected) return;
                 isCorrect = selected.getAttribute('data-correct') === 'true';
 
+                var val = selected.getAttribute('data-value');
+                studentResponseStr = val === 'true' ? 't' : 'f';
+
                 block.querySelectorAll('.tf-btn').forEach(function (b) {
                     b.classList.add('disabled');
                     if (b.getAttribute('data-correct') === 'true') {
@@ -316,6 +322,15 @@
 
             quizResults[quizId] = isCorrect;
             if (isCorrect) correctQuizzes++;
+
+            // Отправляем детальки в LMS (interactions)
+            var interactionType = type === 'mcq' ? 'choice' : 'true-false';
+            var interactionResult = isCorrect ? 'correct' : 'wrong';
+            try {
+                SCORM.recordInteraction(quizId, interactionType, studentResponseStr, interactionResult);
+            } catch (e) {
+                console.log("[SCORM] error recording interaction:", e);
+            }
 
             // Feedback
             var fb = document.getElementById('fb-' + quizId);
