@@ -165,29 +165,57 @@
                         </div>
                         <div class="form-row">
                             <div class="field">
-                                <label>Блоков на страницу</label>
-                                <select id="blocks-per-page">
-                                    <option value="2">2 (кратко)</option>
-                                    <option value="3" selected>3 (стандарт)</option>
-                                    <option value="4">4 (подробно)</option>
-                                    <option value="5">5 (детально)</option>
-                                </select>
-                            </div>
-                            <div class="field">
-                                <label>Вопросов на страницу</label>
-                                <select id="questions-per-page">
+                                <label>Разделов в модуле</label>
+                                <select id="sectionsPerModule">
                                     <option value="1" selected>1</option>
                                     <option value="2">2</option>
                                     <option value="3">3</option>
                                 </select>
                             </div>
                             <div class="field">
-                                <label>Детальность теории</label>
-                                <select id="detail-level">
+                                <label>Уроков (SCO) в разделе</label>
+                                <select id="scosPerSection">
+                                    <option value="1">1</option>
+                                    <option value="2" selected>2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label>Экранов теории</label>
+                                <select id="screensPerSco">
+                                    <option value="1">1</option>
+                                    <option value="2" selected>2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="field">
+                                <label>Вопросов после урока</label>
+                                <select id="questionsPerSco">
+                                    <option value="0">0</option>
+                                    <option value="1" selected>1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label>Итоговый тест (вопросов)</label>
+                                <select id="finalTestQuestions">
+                                    <option value="0">Без теста</option>
+                                    <option value="3">3</option>
+                                    <option value="5" selected>5</option>
+                                    <option value="10">10</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label>Детальность текста</label>
+                                <select id="detailLevel">
                                     <option value="brief">Кратко</option>
-                                    <option value="normal" selected>Стандарт</option>
-                                    <option value="detailed">Детально</option>
-                                    <option value="expert">Экспертно</option>
+                                    <option value="normal" selected>Нормально</option>
+                                    <option value="detailed">Подробно</option>
                                 </select>
                             </div>
                         </div>
@@ -212,15 +240,11 @@
                     </div>
                     <div class="form-row">
                         <div class="field">
-                            <label>Страниц</label>
-                            <select id="pages">
+                            <label>Кол-во Модулей</label>
+                            <select id="numModules">
+                                <option value="1" selected>1</option>
                                 <option value="2">2</option>
-                                <option value="3" selected>3</option>
-                                <option value="4">4</option>
-                                <option value="5">5</option>
-                                <option value="6">6</option>
-                                <option value="8">8</option>
-                                <option value="10">10</option>
+                                <option value="3">3</option>
                             </select>
                         </div>
                         <div class="field">
@@ -255,6 +279,17 @@
 
             <!-- Progress -->
             <div class="progress-section" id="progress-section" style="display:none">
+                <div class="progress-header">
+                    <div class="progress-step active" id="step-gen">
+                        <span class="step-icon">1</span> Генерация
+                    </div>
+                    <div class="progress-step" id="step-build">
+                        <span class="step-icon">2</span> Сборка SCORM
+                    </div>
+                    <div class="progress-step" id="step-done">
+                        <span class="step-icon">3</span> Готово
+                    </div>
+                </div>
                 <div class="progress-bar-wrap">
                     <div class="progress-bar" id="gen-progress"></div>
                 </div>
@@ -263,10 +298,59 @@
 
             <!-- Preview -->
             <section class="preview-section" id="preview-section" style="display:none">
-                <h2>Предпросмотр курса</h2>
+                <!-- Preview Tabs -->
+                <div class="preview-tabs">
+                    <button class="preview-tab active" onclick="switchPreviewTab('overview')" id="ptab-overview">
+                        📊 Обзор курса
+                    </button>
+                    <button class="preview-tab" onclick="switchPreviewTab('live')" id="ptab-live">
+                        👁 Предпросмотр SCORM
+                    </button>
+                    <button class="preview-tab" onclick="switchPreviewTab('json')" id="ptab-json">
+                        📝 JSON Редактор
+                    </button>
+                </div>
 
-                <div class="course-header" id="course-header"></div>
-                <div class="course-pages" id="course-pages"></div>
+                <!-- Tab: Overview -->
+                <div class="preview-pane" id="pane-overview">
+                    <div class="course-header" id="course-header"></div>
+                    <div class="course-pages" id="course-pages"></div>
+                </div>
+
+                <!-- Tab: Live SCORM Preview -->
+                <div class="preview-pane" id="pane-live" style="display:none">
+                    <div class="iframe-toolbar">
+                        <button class="btn btn-sm btn-secondary" onclick="refreshPreview()">
+                            🔄 Обновить
+                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="openPreviewFullscreen()">
+                            ⛶ Полный экран
+                        </button>
+                    </div>
+                    <div class="iframe-container">
+                        <iframe id="scorm-preview-iframe" src="about:blank"></iframe>
+                    </div>
+                </div>
+
+                <!-- Tab: JSON Editor -->
+                <div class="preview-pane" id="pane-json" style="display:none">
+                    <div class="json-editor-toolbar">
+                        <div class="json-toolbar-left">
+                            <span class="json-status" id="json-status">Valid JSON</span>
+                        </div>
+                        <div class="json-toolbar-right">
+                            <button class="btn btn-sm btn-secondary" onclick="formatJSON()">
+                                🔤 Форматировать
+                            </button>
+                            <button class="btn btn-sm btn-primary" onclick="saveJSON()" id="btn-save-json">
+                                💾 Сохранить и пересобрать
+                            </button>
+                        </div>
+                    </div>
+                    <textarea id="json-editor" class="json-editor" spellcheck="false"
+                        oninput="validateJSONInput()"></textarea>
+                    <div class="json-error" id="json-error"></div>
+                </div>
 
                 <!-- Actions -->
                 <div class="actions">
@@ -292,6 +376,19 @@
                 </div>
 
                 <div class="status-msg action-msg" id="action-msg"></div>
+            </section>
+
+            <!-- History -->
+            <section class="history-section" id="history-section">
+                <div class="history-header" onclick="toggleHistory()">
+                    <h3>📁 История генераций</h3>
+                    <span class="chevron" id="history-chevron">▾</span>
+                </div>
+                <div class="history-body" id="history-body">
+                    <div class="history-list" id="history-list">
+                        <div class="history-empty">Пока нет сгенерированных пакетов</div>
+                    </div>
+                </div>
             </section>
         </main>
     </div>

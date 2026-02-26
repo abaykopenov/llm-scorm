@@ -692,13 +692,278 @@ textarea:focus {
     font-size: 14px;
 }
 
-/* ─── Actions ─── */
+/* ─── Progress Steps ─── */
+.progress-header {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 12px;
+}
+
+.progress-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    transition: all 0.3s;
+}
+
+.progress-step.active {
+    color: var(--accent);
+}
+
+.progress-step.completed {
+    color: var(--success);
+}
+
+.step-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    transition: all 0.3s;
+}
+
+.progress-step.active .step-icon {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.progress-step.completed .step-icon {
+    background: var(--success);
+    border-color: var(--success);
+    color: white;
+}
+
+/* ─── Preview Tabs ─── */
+.preview-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    background: var(--bg-input);
+    border-radius: var(--radius-sm);
+    padding: 4px;
+    border: 1px solid var(--border);
+}
+
+.preview-tab {
+    flex: 1;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.preview-tab.active {
+    background: var(--accent);
+    color: white;
+}
+
+.preview-tab:not(.active):hover {
+    color: var(--text);
+    background: var(--bg-card-hover);
+}
+
+.preview-pane {
+    animation: fadeIn 0.3s ease;
+}
+
+/* ─── SCORM iframe Preview ─── */
+.iframe-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.iframe-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    height: 600px;
+}
+
+.iframe-container iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* ─── JSON Editor ─── */
+.json-editor-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.json-toolbar-left,
+.json-toolbar-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.json-status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 12px;
+}
+
+.json-status.valid {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.json-status.invalid {
+    background: var(--error-bg);
+    color: var(--error);
+}
+
+.json-editor {
+    width: 100%;
+    height: 400px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    color: var(--accent-hover);
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    outline: none;
+    resize: vertical;
+    tab-size: 2;
+    transition: border-color 0.2s;
+}
+
+.json-editor:focus {
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.json-error {
+    display: none;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: var(--error-bg);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-sm);
+    color: var(--error);
+    font-size: 12px;
+    font-family: monospace;
+}
+
+/* ─── History ─── */
+.history-section {
+    margin-top: 32px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.history-header:hover {
+    background: var(--bg-card-hover);
+}
+
+.history-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+}
+
+.history-body {
+    padding: 0 20px 16px;
+}
+
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: all 0.2s;
+}
+
+.history-item:hover {
+    border-color: var(--accent);
+    background: rgba(99, 102, 241, 0.05);
+}
+
+.history-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.history-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.history-meta {
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+.history-download {
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.history-empty {
+    text-align: center;
+    padding: 16px;
+    color: var(--text-dim);
+    font-size: 13px;
+}
+
+/* ─── Actions (updated) ─── */
 .actions {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
+    margin-top: 16px;
 }
 
 .actions-left,
@@ -763,5 +1028,28 @@ textarea:focus {
 
     .form-row {
         flex-wrap: wrap;
+    }
+
+    .preview-tabs {
+        flex-direction: column;
+    }
+
+    .iframe-container {
+        height: 400px;
+    }
+
+    .json-editor {
+        height: 250px;
+    }
+
+    .actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .actions-left,
+    .actions-right {
+        flex-wrap: wrap;
+        justify-content: center;
     }
 }

@@ -1,280 +1,381 @@
 """
-LLM Course Generator — генерация JSON-структуры курса через OpenAI API.
+LLM Course Generator — многошаговая генерация иерархичного SCORM-курса.
 
-Поддерживает два режима:
-1. Генерация через LLM (OpenAI API) — по теме
-2. Загрузка готового JSON — из файла
-
-Промежуточный формат JSON:
-{
-    "title": "Название курса",
-    "description": "Описание курса",
-    "language": "ru",
-    "pages": [
-        {
-            "title": "Название страницы",
-            "blocks": [
-                {
-                    "type": "text",
-                    "title": "Заголовок блока",
-                    "body": "Текст блока (HTML)"
-                },
-                {
-                    "type": "mcq",
-                    "title": "Вопрос",
-                    "body": "Текст вопроса",
-                    "options": [
-                        {"text": "Вариант 1", "correct": true},
-                        {"text": "Вариант 2", "correct": false}
-                    ],
-                    "feedback_correct": "Правильно!",
-                    "feedback_incorrect": "Неправильно."
-                },
-                {
-                    "type": "truefalse",
-                    "title": "Вопрос True/False",
-                    "body": "Утверждение",
-                    "correct_answer": true,
-                    "feedback_correct": "Верно!",
-                    "feedback_incorrect": "Неверно."
-                }
-            ]
-        }
-    ]
-}
+Поддерживает типы блоков:
+- text       — текстовый блок с теорией
+- mcq        — вопрос с вариантами ответа
+- truefalse  — верно / неверно
+- fillin     — заполни пропуск
+- matching   — сопоставление (пары)
+- ordering   — сортировка (расположи по порядку)
 """
 
 import json
+import logging
 import os
+import time
+from typing import Callable, Any
 
 import config
 
+logger = logging.getLogger(__name__)
+
+VALID_BLOCK_TYPES = {"text", "mcq", "truefalse", "fillin", "matching", "ordering"}
+VALID_DETAIL_LEVELS = {"brief", "normal", "detailed", "expert"}
 
 class LLMCourseGenerator:
-    """Генератор JSON-структуры курса."""
+    """Оркестратор генерации SCORM-курса (Каркас -> SCO -> SCO -> Тест)."""
+
+    MAX_RETRIES = 3
+    RETRY_DELAY = 3
 
     def __init__(self, api_key: str | None = None, model: str | None = None,
                  base_url: str | None = None):
         self.api_key = api_key or config.OPENAI_API_KEY
         self.base_url = base_url or config.OPENAI_BASE_URL or None
         self.model = model or config.OPENAI_MODEL
+        logger.info("LLMCourseGenerator: model=%s, base_url=%s",
+                     self.model, self.base_url or "OpenAI API")
 
     # ------------------------------------------------------------------
-    # Публичные методы
+    # Оркестратор
     # ------------------------------------------------------------------
 
-    def generate_course(self, topic: str, num_pages: int | None = None,
-                        language: str | None = None,
+    def generate_course(self, topic: str, language: str = "ru",
+                        num_modules: int = 1, sections_per_module: int = 1,
+                        scos_per_section: int = 1, screens_per_sco: int = 2,
+                        questions_per_sco: int = 1, final_test_questions: int = 5,
+                        detail_level: str = "normal",
                         temperature: float | None = None,
                         max_tokens: int | None = None,
-                        blocks_per_page: int = 3,
-                        questions_per_page: int = 1,
-                        detail_level: str = "normal",
-                        system_prompt: str | None = None,
-                        extra_instructions: str | None = None) -> dict:
-        """Генерация курса через OpenAI API.
-
-        Args:
-            topic: Тема курса.
-            num_pages: Количество страниц (по умолчанию из config).
-            language: Язык курса (по умолчанию из config).
-            temperature: Температура генерации (0.0-1.5).
-            max_tokens: Максимальное количество токенов.
-            blocks_per_page: Блоков на страницу (2-5).
-            questions_per_page: Вопросов на страницу (1-3).
-            detail_level: Уровень детальности (brief/normal/detailed/expert).
-            system_prompt: Кастомный системный промпт.
-            extra_instructions: Дополнительные инструкции.
-
-        Returns:
-            dict — JSON-структура курса.
+                        progress_callback: Callable[[str, int], None] | None = None) -> dict:
         """
-        # Для локальных моделей API key не обязателен
+        Многошаговая генерация курса.
+        
+        Args:
+            topic: Тема курса
+            ...
+            progress_callback: Функция f(message: str, percent: int) для UI.
+        """
         if not self.api_key and not self.base_url:
-            raise ValueError(
-                "OpenAI API key не задан. Установите переменную окружения "
-                "OPENAI_API_KEY или передайте ключ в конструктор.\n"
-                "Для локальных моделей укажите --base-url (API key не нужен)."
-            )
+            raise ValueError("LLM API key или Base URL не задан.")
 
-        num_pages = num_pages or config.DEFAULT_NUM_PAGES
-        language = language or config.DEFAULT_COURSE_LANGUAGE
-        temperature = temperature if temperature is not None else config.OPENAI_TEMPERATURE
-        max_tokens = max_tokens or config.OPENAI_MAX_TOKENS
+        temp = temperature if temperature is not None else config.OPENAI_TEMPERATURE
+        tokens = max_tokens or config.OPENAI_MAX_TOKENS
 
-        prompt = self._build_prompt(
-            topic, num_pages, language,
-            blocks_per_page=blocks_per_page,
-            questions_per_page=questions_per_page,
-            detail_level=detail_level,
-            extra_instructions=extra_instructions,
+        def report(msg: str, pct: int):
+            logger.info("Прогресс [%d%%]: %s", pct, msg)
+            if progress_callback:
+                progress_callback(msg, pct)
+
+        total_scos = num_modules * sections_per_module * scos_per_section
+        scos_completed = 0
+
+        # ----------------------------------------------------
+        # Шаг 1: Генерация Каркаса (Outline)
+        # ----------------------------------------------------
+        report("Генерация структуры курса...", 5)
+        outline_prompt = self._build_outline_prompt(
+            topic, language, num_modules, sections_per_module, scos_per_section
+        )
+        
+        course = self._call_llm(
+            prompt=outline_prompt, temp=temp, tokens=tokens,
+            sys_prompt="Ты эксперт по методологии (педагогический дизайнер). Верни только JSON."
         )
 
+        # Добавим настройки (временно хардкодим дефолты или можно передавать)
+        course["settings"] = {
+            "passing_score": 80,
+            "max_attempts": 3,
+            "max_time_minutes": 60
+        }
+        course["language"] = language
+
+        # ----------------------------------------------------
+        # Шаг 2: Генерация Контента каждого SCO
+        # ----------------------------------------------------
+        report("Генерация контента уроков...", 15)
+        
+        # Индексы прогресса: от 15% до 85%
+        for mod in course.get("modules", []):
+            for sec in mod.get("sections", []):
+                for sco in sec.get("scos", []):
+                    sco_title = sco.get("title", "Untitled SCO")
+                    pct = 15 + int(((scos_completed) / total_scos) * 70)
+                    report(f"Генерация контента: {sco_title}", pct)
+
+                    sco_prompt = self._build_sco_prompt(
+                        topic=topic,
+                        course_outline=json.dumps(course, ensure_ascii=False),
+                        target_sco_title=sco_title,
+                        language=language,
+                        screens_per_sco=screens_per_sco,
+                        questions_per_sco=questions_per_sco,
+                        detail_level=detail_level
+                    )
+
+                    sco_data = self._call_llm(
+                        prompt=sco_prompt, temp=temp, tokens=tokens,
+                        sys_prompt="Ты автор учебных материалов. Верни JSON со структурой экранов и вопросов."
+                    )
+                    
+                    # Подмешиваем сгенерированные экраны и вопросы
+                    sco["screens"] = sco_data.get("screens", [])
+                    sco["knowledge_check"] = sco_data.get("knowledge_check", [])
+                    scos_completed += 1
+
+        # ----------------------------------------------------
+        # Шаг 3: Генерация Итогового Теста
+        # ----------------------------------------------------
+        if final_test_questions > 0:
+            report("Генерация итогового теста...", 90)
+            test_prompt = self._build_test_prompt(
+                topic, json.dumps(course, ensure_ascii=False), language, final_test_questions
+            )
+            test_data = self._call_llm(
+                prompt=test_prompt, temp=temp, tokens=tokens,
+                sys_prompt="Ты экзаменатор. Верни JSON с массивом вопросов для финального теста."
+            )
+            course["final_test"] = test_data.get("final_test", [])
+        else:
+            course["final_test"] = []
+
+        # ----------------------------------------------------
+        # Завершение
+        # ----------------------------------------------------
+        report("Курс успешно сгенерирован!", 100)
+        
+        # Валидация
+        errors = self.validate_course_json(course)
+        if errors:
+            logger.warning("Валидация итогового JSON выявила проблемы: %s", errors)
+
+        return course
+
+    # ------------------------------------------------------------------
+    # LLM Wrapper
+    # ------------------------------------------------------------------
+
+    def _call_llm(self, prompt: str, temp: float, tokens: int, sys_prompt: str) -> dict:
+        """Вспомогательный метод с retry-логикой для вызова LLM и парсинга JSON."""
         try:
             from openai import OpenAI
-
-            # Настройка клиента: OpenAI API или локальная модель
-            client_kwargs = {}
-            if self.base_url:
-                client_kwargs["base_url"] = self.base_url
-                # Для локальных моделей API key может быть любым
-                client_kwargs["api_key"] = self.api_key or "local"
-                print(f"   Сервер: {self.base_url}")
-            else:
-                client_kwargs["api_key"] = self.api_key
-
-            client = OpenAI(**client_kwargs)
-
-            # Системный промпт
-            sys_prompt = system_prompt or (
-                "Ты — генератор учебных курсов. "
-                "Генерируй только валидный JSON без комментариев и markdown."
-            )
-
-            # Параметры запроса
-            request_kwargs = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
-
-            # json_object mode поддерживается не всеми моделями
-            # (Ollama, vLLM обычно поддерживают, но некоторые — нет)
-            try:
-                request_kwargs["response_format"] = {"type": "json_object"}
-                response = client.chat.completions.create(**request_kwargs)
-            except Exception:
-                # Fallback: без response_format
-                del request_kwargs["response_format"]
-                response = client.chat.completions.create(**request_kwargs)
-
-            raw = response.choices[0].message.content
-
-            # Очистка ответа от возможного markdown обрамления
-            raw = raw.strip()
-            if raw.startswith("```"):
-                # Убираем ```json ... ```
-                lines = raw.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                raw = "\n".join(lines)
-
-            return json.loads(raw)
-
         except ImportError:
-            raise ImportError(
-                "Пакет openai не установлен. Выполните: pip install openai"
-            )
+            raise ImportError("Пакет openai не установлен.")
 
-    @staticmethod
-    def generate_from_file(path: str) -> dict:
-        """Загрузка готовой JSON-структуры курса из файла.
+        client_kwargs = {"api_key": self.api_key or "local"}
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
 
-        Args:
-            path: Путь к JSON-файлу.
+        client = OpenAI(**client_kwargs)
 
-        Returns:
-            dict — JSON-структура курса.
-        """
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"Файл не найден: {path}")
+        request_kwargs = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": temp,
+            "max_tokens": tokens,
+        }
 
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        last_error = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                try:
+                    request_kwargs["response_format"] = {"type": "json_object"}
+                    response = client.chat.completions.create(**request_kwargs)
+                except Exception:
+                    # Fallback для моделей, не поддерживающих json_object
+                    if "response_format" in request_kwargs:
+                        del request_kwargs["response_format"]
+                    response = client.chat.completions.create(**request_kwargs)
 
-        # Базовая валидация
-        if "title" not in data:
-            raise ValueError("JSON должен содержать поле 'title'")
-        if "pages" not in data or not isinstance(data["pages"], list):
-            raise ValueError("JSON должен содержать массив 'pages'")
+                raw = response.choices[0].message.content.strip()
+                
+                # Cleanup markdown
+                if raw.startswith("```"):
+                    lines = raw.split("\n")
+                    if lines[0].startswith("```"): lines = lines[1:]
+                    if lines and lines[-1].strip() == "```": lines = lines[:-1]
+                    raw = "\n".join(lines)
 
-        return data
+                return json.loads(raw)
+
+            except json.JSONDecodeError as e:
+                last_error = e
+                logger.warning("JSONDecodeError попытка %d: %s", attempt, str(e))
+                if attempt < self.MAX_RETRIES: time.sleep(self.RETRY_DELAY)
+            except Exception as e:
+                last_error = e
+                logger.error("LLM Error попытка %d: %s", attempt, str(e))
+                if attempt < self.MAX_RETRIES: time.sleep(self.RETRY_DELAY)
+
+        raise RuntimeError(f"Сбой вызова LLM после {self.MAX_RETRIES} попыток: {last_error}")
 
     # ------------------------------------------------------------------
-    # Приватные методы
+    # Промпты
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _build_prompt(topic: str, num_pages: int, language: str,
-                      blocks_per_page: int = 3, questions_per_page: int = 1,
-                      detail_level: str = "normal",
-                      extra_instructions: str | None = None) -> str:
-        """Формирование промпта для LLM."""
-
+    def _build_outline_prompt(self, topic: str, language: str,
+                              num_modules: int, sections: int, scos: int) -> str:
         lang_label = "русском" if language == "ru" else "английском"
+        return f"""Создай структуру учебного курса на тему "{topic}" на {lang_label} языке.
+Структура должна состоять из:
+- {num_modules} Модуль(ей)
+- В каждом модуле {sections} Раздел(а)
+- В каждом разделе {scos} Урок(ов) (SCO)
 
-        # Детальность
+Верни ТОЛЬКО JSON:
+{{
+  "title": "Название курса",
+  "description": "Краткое описание курса",
+  "modules": [
+    {{
+      "title": "Название модуля",
+      "sections": [
+        {{
+          "title": "Название раздела",
+          "scos": [
+            {{ "title": "Название урока" }}
+          ]
+        }}
+      ]
+    }}
+  ]
+}}"""
+
+    def _build_sco_prompt(self, topic: str, course_outline: str, target_sco_title: str,
+                          language: str, screens_per_sco: int, questions_per_sco: int,
+                          detail_level: str) -> str:
+        lang_label = "русском" if language == "ru" else "английском"
+        
         detail_map = {
-            "brief": "Каждый текстовый блок — 2-3 предложения, только самое важное.",
-            "normal": "Каждый текстовый блок — 1-2 абзаца с теорией и примерами.",
-            "detailed": "Каждый текстовый блок — 2-3 абзаца с подробными объяснениями, примерами и определениями.",
-            "expert": "Каждый текстовый блок — 3-5 абзацев с углублённым анализом, примерами кода, таблицами и ссылками.",
+            "brief": "Каждый экран: 2-3 предложения главного.",
+            "normal": "Каждый экран: 1-2 абзаца + примеры.",
+            "detailed": "Каждый экран: 2-3 абзаца, глубоко.",
+            "expert": "Каждый экран: 3-5 абзацев, технически глубоко."
         }
         detail_text = detail_map.get(detail_level, detail_map["normal"])
 
-        text_blocks = blocks_per_page - questions_per_page
-        if text_blocks < 1:
-            text_blocks = 1
+        return f"""Мы создаем курс "{topic}". 
+Вот его общая структура (для контекста):
+{course_outline}
 
-        extra = ""
-        if extra_instructions:
-            extra = f"\n\nДополнительные требования:\n{extra_instructions}"
+Твоя задача — написать детальный контент только для урока: "{target_sco_title}" на {lang_label} языке.
 
-        return f"""Создай учебный курс на тему "{topic}" на {lang_label} языке.
+Требования:
+- {screens_per_sco} экранов теории (каждый экран - один text-блок).
+- {detail_text}
+- {questions_per_sco} вопросов(а) для проверки знаний после теории (в массиве knowledge_check).
 
-Курс должен содержать ровно {num_pages} страниц.
-Каждая страница должна содержать {text_blocks} текстовых блок(ов) с теорией
-и {questions_per_page} вопрос(ов) (mcq или truefalse).
-Итого {blocks_per_page} блоков на каждой странице.
+Типы вопросов: mcq, truefalse, fillin, matching, ordering.
 
-{detail_text}
-
-Блоки могут быть трёх типов: "text", "mcq" (вопрос с вариантами), "truefalse".
-Для MCQ вопросов: 3-5 вариантов ответа, ровно один correct: true.{extra}
-
-Верни JSON в следующем формате:
+Верни ТОЛЬКО JSON:
 {{
-    "title": "Название курса",
-    "description": "Краткое описание курса (1-2 предложения)",
-    "language": "{language}",
-    "pages": [
+  "screens": [
+    {{
+      "title": "Название экрана",
+      "blocks": [
         {{
-            "title": "Название страницы",
-            "blocks": [
-                {{
-                    "type": "text",
-                    "title": "Заголовок",
-                    "body": "<p>HTML-текст теории. Можно использовать <strong>, <em>, <ul>, <li>, <code>.</p>"
-                }},
-                {{
-                    "type": "mcq",
-                    "title": "Вопрос",
-                    "body": "Текст вопроса",
-                    "options": [
-                        {{"text": "Вариант 1", "correct": true}},
-                        {{"text": "Вариант 2", "correct": false}},
-                        {{"text": "Вариант 3", "correct": false}}
-                    ],
-                    "feedback_correct": "Правильно! Потому что...",
-                    "feedback_incorrect": "Неправильно. Правильный ответ: ..."
-                }},
-                {{
-                    "type": "truefalse",
-                    "title": "Верно или неверно",
-                    "body": "Утверждение для проверки",
-                    "correct_answer": true,
-                    "feedback_correct": "Верно!",
-                    "feedback_incorrect": "Неверно. На самом деле..."
-                }}
-            ]
+          "type": "text",
+          "title": "Заголовок",
+          "body": "<p>HTML-текст</p>"
         }}
-    ]
-}}
+      ]
+    }}
+  ],
+  "knowledge_check": [
+    {{
+      "type": "mcq",
+      "title": "Вопрос",
+      "body": "Текст",
+      "options": [{{"text":"Да","correct":true}}, {{"text":"Нет","correct":false}}],
+      "feedback_correct": "...",
+      "feedback_incorrect": "..."
+    }}
+  ]
+}}"""
 
-Верни ТОЛЬКО JSON, без пояснений и markdown."""
+    def _build_test_prompt(self, topic: str, course_db: str, language: str, limit: int) -> str:
+        lang_label = "русском" if language == "ru" else "английском"
+        return f"""Мы завершили курс "{topic}" на {lang_label} языке.
+Сгенерируй Итоговый тест из {limit} сложных вопросов, покрывающий весь материал.
+Типы вопросов: mcq, truefalse, fillin, matching, ordering. (Используй разные).
+
+Верни ТОЛЬКО JSON:
+{{
+  "final_test": [
+    {{
+       "type": "mcq",
+       // ... поля вопроса
+    }}
+  ]
+}}"""
+
+    # ------------------------------------------------------------------
+    # Валидация / Вспомогательные
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def validate_course_json(data: dict) -> list[str]:
+        """Рекурсивная валидация новой иерархичной структуры JSON."""
+        errors = []
+        if not isinstance(data, dict):
+            return ["Корневой элемент должен быть объектом (dict)"]
+        if "title" not in data: errors.append("Отсутствует 'title'")
+        if "modules" not in data: 
+            errors.append("Отсутствует 'modules'")
+            return errors
+
+        for i, mod in enumerate(data["modules"]):
+            if "title" not in mod: errors.append(f"modules[{i}]: нет 'title'")
+            if "sections" not in mod: errors.append(f"modules[{i}]: нет 'sections'")
+            else:
+                for j, sec in enumerate(mod["sections"]):
+                    if "scos" not in sec: errors.append(f"modules[{i}].sections[{j}]: нет 'scos'")
+                    else:
+                        for k, sco in enumerate(sec["scos"]):
+                            if "screens" not in sco:
+                                errors.append(f"modules[{i}].sec[{j}].sco[{k}]: нет 'screens'")
+
+        return errors
+
+    @staticmethod
+    def generate_from_file(path: str) -> dict:
+        """Загрузка готовой JSON-структуры курса из файла."""
+        if not os.path.isfile(path): raise FileNotFoundError(f"Файл не найден: {path}")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # Для обратной совместимости старых файлов (course -> pages)
+        # преобразуем плоский список pages в один модуль -> раздел -> SCOs
+        if "pages" in data and "modules" not in data:
+            logger.info("Конвертация старой схемы (pages) в новую (modules)...")
+            scos = []
+            for i, p in enumerate(data.get("pages", [])):
+                # Все text блоки на один экран, вопросы в knowledge_check
+                texts = [b for b in p.get("blocks", []) if b.get("type") == "text"]
+                questions = [b for b in p.get("blocks", []) if b.get("type") != "text"]
+                scos.append({
+                    "title": p.get("title", f"Урок {i+1}"),
+                    "screens": [{"title": "Введение", "blocks": texts}],
+                    "knowledge_check": questions
+                })
+            
+            data["modules"] = [{
+                "title": "Основной модуль",
+                "sections": [{
+                    "title": "Раздел 1",
+                    "scos": scos
+                }]
+            }]
+            data["final_test"] = []
+            del data["pages"]
+
+        errors = LLMCourseGenerator.validate_course_json(data)
+        if errors:
+            logger.warning("Валидация файла %s: %s", path, "; ".join(errors))
+            
+        return data

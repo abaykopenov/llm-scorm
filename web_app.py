@@ -239,66 +239,95 @@ def chamilo_courses():
 
 @app.route("/api/generate", methods=["POST"])
 def generate_course():
-    """Generate course via LLM."""
+    """Generate course via LLM (Multi-step)."""
     if _state["generating"]:
         return jsonify({"ok": False, "error": "Генерация уже запущена"})
 
     data = request.json
     topic = data.get("topic", "")
-    pages = int(data.get("pages", 3))
     lang = data.get("lang", "ru")
     base_url = data.get("base_url", "")
     model = data.get("model", "")
     api_key = data.get("api_key", "")
 
-    # Advanced settings
+    # Advanced settings (Hierarchy)
+    num_modules = int(data.get("num_modules", 1))
+    sections_per_module = int(data.get("sections_per_module", 1))
+    scos_per_section = int(data.get("scos_per_section", 1))
+    screens_per_sco = int(data.get("screens_per_sco", 2))
+    questions_per_sco = int(data.get("questions_per_sco", 1))
+    final_test_questions = int(data.get("final_test_questions", 3))
+
     temperature = float(data.get("temperature", 0.7))
     max_tokens = int(data.get("max_tokens", 4096))
-    blocks_per_page = int(data.get("blocks_per_page", 3))
-    questions_per_page = int(data.get("questions_per_page", 1))
     detail_level = data.get("detail_level", "normal")
-    system_prompt = data.get("system_prompt", "")
-    extra_instructions = data.get("extra_instructions", "")
 
     if not topic:
         return jsonify({"ok": False, "error": "Укажите тему курса"})
 
     _state["generating"] = True
+    _state["progress_msg"] = "Инициализация..."
+    _state["progress_pct"] = 0
+    _state["last_error"] = None
 
-    try:
-        from llm_generator import LLMCourseGenerator
-        generator = LLMCourseGenerator(
-            api_key=api_key or None,
-            model=model or None,
-            base_url=base_url or None,
-        )
+    def bg_generate():
+        try:
+            from llm_generator import LLMCourseGenerator
+            generator = LLMCourseGenerator(
+                api_key=api_key or None,
+                model=model or None,
+                base_url=base_url or None,
+            )
 
-        course = generator.generate_course(
-            topic=topic,
-            num_pages=pages,
-            language=lang,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            blocks_per_page=blocks_per_page,
-            questions_per_page=questions_per_page,
-            detail_level=detail_level,
-            system_prompt=system_prompt or None,
-            extra_instructions=extra_instructions or None,
-        )
+            def prog_cb(msg, pct):
+                _state["progress_msg"] = msg
+                _state["progress_pct"] = pct
 
-        _state["last_course_json"] = course
-        _state["generating"] = False
+            course = generator.generate_course(
+                topic=topic,
+                language=lang,
+                num_modules=num_modules,
+                sections_per_module=sections_per_module,
+                scos_per_section=scos_per_section,
+                screens_per_sco=screens_per_sco,
+                questions_per_sco=questions_per_sco,
+                final_test_questions=final_test_questions,
+                detail_level=detail_level,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                progress_callback=prog_cb
+            )
 
-        return jsonify({"ok": True, "course": course})
+            _state["last_course_json"] = course
+            _state["progress_msg"] = "Готово!"
+            _state["progress_pct"] = 100
+        except Exception as e:
+            err = str(e)
+            if "insufficient_quota" in err: err = "Квота OpenAI исчерпана. Проверьте баланс."
+            elif "Connection" in err or "connect" in err.lower(): err = "Не удалось подключиться к LLM-серверу."
+            _state["last_error"] = err[:300]
+        finally:
+            _state["generating"] = False
 
-    except Exception as e:
-        _state["generating"] = False
-        err = str(e)
-        if "insufficient_quota" in err:
-            err = "Квота OpenAI исчерпана. Проверьте баланс."
-        elif "Connection" in err or "connect" in err.lower():
-            err = "Не удалось подключиться к LLM-серверу."
-        return jsonify({"ok": False, "error": err[:300]})
+    t = threading.Thread(target=bg_generate)
+    t.daemon = True
+    t.start()
+
+    return jsonify({"ok": True, "message": "Генерация запущена"})
+
+
+@app.route("/api/generate-status", methods=["GET"])
+def generate_status():
+    if _state.get("last_error"):
+        return jsonify({"ok": False, "error": _state["last_error"], "generating": False})
+    
+    return jsonify({
+        "ok": True,
+        "generating": _state.get("generating", False),
+        "msg": _state.get("progress_msg", ""),
+        "pct": _state.get("progress_pct", 0),
+        "course": _state.get("last_course_json") if not _state.get("generating") and _state.get("progress_pct") == 100 else None
+    })
 
 
 @app.route("/api/generate-from-json", methods=["POST"])
@@ -379,12 +408,105 @@ def download_file(filename):
 
 
 # ═══════════════════════════════════════════
+#  History & JSON Editor & Preview
+# ═══════════════════════════════════════════
+
+@app.route("/api/history")
+def history():
+    """List generated SCORM packages from output directory."""
+    import config
+    output_dir = config.OUTPUT_DIR
+    if not os.path.isdir(output_dir):
+        return jsonify({"ok": True, "items": []})
+
+    items = []
+    for f in sorted(os.listdir(output_dir), reverse=True):
+        if f.endswith(".zip"):
+            fpath = os.path.join(output_dir, f)
+            stat = os.stat(fpath)
+            items.append({
+                "filename": f,
+                "size_kb": round(stat.st_size / 1024, 1),
+                "created": stat.st_mtime,
+            })
+
+    return jsonify({"ok": True, "items": items[:20]})  # Last 20
+
+
+@app.route("/api/course-json")
+def get_course_json():
+    """Return current course JSON for the editor."""
+    course = _state.get("last_course_json")
+    if not course:
+        return jsonify({"ok": False, "error": "No course"})
+    return jsonify({"ok": True, "course": course})
+
+
+@app.route("/api/update-course", methods=["POST"])
+def update_course():
+    """Update course JSON from the editor, then rebuild SCORM."""
+    data = request.json
+    course = data.get("course")
+    if not course:
+        return jsonify({"ok": False, "error": "JSON not provided"})
+
+    # Validate
+    from llm_generator import LLMCourseGenerator
+    errors = LLMCourseGenerator.validate_course_json(course)
+    if errors:
+        return jsonify({"ok": False, "error": "; ".join(errors[:5])})
+
+    _state["last_course_json"] = course
+
+    # Auto-rebuild SCORM
+    try:
+        from scorm_builder import SCORMBuilder
+        builder = SCORMBuilder()
+        path = builder.build(course)
+        _state["last_scorm_path"] = path
+        filename = os.path.basename(path)
+        return jsonify({"ok": True, "course": course, "filename": filename})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:300]})
+
+
+@app.route("/api/preview-scorm")
+def preview_scorm():
+    """Serve SCORM HTML preview (renders index.html from template)."""
+    course = _state.get("last_course_json")
+    if not course:
+        return "<html><body><h2>No course generated yet</h2></body></html>", 200
+
+    try:
+        from jinja2 import Environment, FileSystemLoader
+        import config
+        env = Environment(
+            loader=FileSystemLoader(config.TEMPLATES_DIR),
+            autoescape=False,
+        )
+        template = env.get_template("index.html")
+        html = template.render(
+            title=course.get("title", "Untitled"),
+            description=course.get("description", ""),
+            language=course.get("language", "ru"),
+            pages=course.get("pages", []),
+        )
+        return html, 200
+    except Exception as e:
+        return f"<html><body><h2>Error: {e}</h2></body></html>", 500
+
+
+# ═══════════════════════════════════════════
 #  Run
 # ═══════════════════════════════════════════
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🚀 LLM → SCORM → Chamilo — Web UI")
+    try:
+        print("LLM -> SCORM -> Chamilo -- Web UI")
+    except UnicodeEncodeError:
+        print("LLM -> SCORM -> Chamilo -- Web UI")
     print("   http://localhost:5000")
     print("=" * 50)
     app.run(host="0.0.0.0", port=5000, debug=True)
+

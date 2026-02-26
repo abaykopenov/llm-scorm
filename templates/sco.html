@@ -4,8 +4,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }}</title>
+    <title>{{ sco_title }} - {{ course_title }}</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        .final-quiz-title {
+            margin-top: 30px;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            color: var(--accent);
+            border-bottom: 2px solid var(--accent);
+            padding-bottom: 10px;
+        }
+    </style>
 </head>
 
 <body>
@@ -16,23 +26,27 @@
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <h1>{{ title }}</h1>
-                {% if description %}
-                <p class="course-desc">{{ description }}</p>
-                {% endif %}
+                <h3>{{ course_title }}</h3>
+                <h1 style="font-size:1.1em; margin-top:10px">{{ sco_title }}</h1>
             </div>
             <nav class="sidebar-nav" id="sidebarNav">
-                {% for page in pages %}
+                {% for screen in screens %}
                 <div class="nav-item{% if loop.first %} active{% endif %}" data-page="{{ loop.index0 }}"
                     onclick="goToPage({{ loop.index0 }})">
                     <span class="nav-dot"></span>
-                    <span>{{ page.title }}</span>
+                    <span>{{ screen.title }}</span>
                 </div>
                 {% endfor %}
+                {% if knowledge_check %}
+                <div class="nav-item" data-page="{{ screens | length }}" onclick="goToPage({{ screens | length }})">
+                    <span class="nav-dot"></span>
+                    <span>Проверка знаний</span>
+                </div>
+                {% endif %}
             </nav>
             <div class="sidebar-footer">
                 <div class="progress-text">
-                    <span>Прогресс</span>
+                    <span>Прогресс SCO</span>
                     <span id="progressPercent">0%</span>
                 </div>
                 <div class="progress-bar-container">
@@ -43,15 +57,13 @@
 
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Pages -->
-            {% for page in pages %}
+            <!-- Screens (Theory) -->
+            {% for screen in screens %}
             {% set page_idx = loop.index0 %}
             <div class="page-container" id="page-{{ page_idx }}" style="{% if not loop.first %}display:none{% endif %}">
-                <h2 class="page-title">{{ page.title }}</h2>
+                <h2 class="page-title">{{ screen.title }}</h2>
 
-                {% for block in page.blocks %}
-                {% set block_idx = loop.index0 %}
-                {% set quiz_id = "quiz-" ~ page_idx ~ "-" ~ block_idx %}
+                {% for block in screen.blocks %}
                 {% if block.type == 'text' %}
                 <!-- Text Block -->
                 <div class="block">
@@ -63,8 +75,22 @@
                         {{ block.body }}
                     </div>
                 </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endfor %}
 
-                {% elif block.type == 'mcq' %}
+            <!-- Knowledge Check (Quiz) -->
+            {% if knowledge_check %}
+            {% set page_idx = screens | length %}
+            <div class="page-container" id="page-{{ page_idx }}" style="display:none">
+                <h2 class="page-title">Проверка знаний</h2>
+
+                {% for block in knowledge_check %}
+                {% set block_idx = loop.index0 %}
+                {% set quiz_id = "quiz-" ~ block_idx %}
+
+                {% if block.type == 'mcq' %}
                 <!-- MCQ Block -->
                 <div class="block quiz-block" id="{{ quiz_id }}">
                     <div class="block-title">
@@ -202,20 +228,21 @@
                         data-correct-order="{{ block['items'] | tojson | e }}">
                     </div>
                 </div>
-
                 {% endif %}
                 {% endfor %}
-            </div>
-            {% endfor %}
 
+                <button class="nav-btn primary" id="btnFinishSCO" style="margin-top:20px; width:100%"
+                    onclick="showCompletion()">Показать результат SCO</button>
+            </div>
+            {% endif %}
 
             <!-- Completion Screen -->
             <div class="completion-screen" id="completionScreen">
                 <div class="completion-icon">🎉</div>
-                <h2 class="completion-title">Курс завершён!</h2>
-                <p class="completion-text">Поздравляем! Вы прошли все страницы курса.</p>
+                <h2 class="completion-title">Урок завершён!</h2>
+                <p class="completion-text">Вы можете перейти к следующему уроку в плеере курса.</p>
                 <div class="completion-score" id="finalScore">0%</div>
-                <p class="completion-score-label">Итоговый результат</p>
+                <p class="completion-score-label">Результат проверки знаний</p>
             </div>
 
             <!-- Bottom padding for nav footer -->
@@ -228,7 +255,9 @@
         <button class="nav-btn" id="btnPrev" onclick="prevPage()" disabled>
             ← Назад
         </button>
-        <span class="page-indicator" id="pageIndicator">1 / {{ pages | length }}</span>
+        {% set total_pages = screens | length + (1 if knowledge_check else 0) %}
+        {% if total_pages == 0 %} {% set total_pages = 1 %} {% endif %}
+        <span class="page-indicator" id="pageIndicator">1 / {{ total_pages }}</span>
         <button class="nav-btn primary" id="btnNext" onclick="nextPage()">
             Далее →
         </button>
@@ -239,15 +268,15 @@
         (function () {
             "use strict";
 
-            var totalPages = {{ pages | length
-        }};
+            var totalPages = {{ total_pages }
+        };
         var currentPage = 0;
         var visitedPages = new Set([0]);
         var quizResults = {};
         var totalQuizzes = 0;
         var correctQuizzes = 0;
+        var passingScore = {{ passing_score }};
 
-        // Count total quizzes
         document.querySelectorAll('.quiz-block').forEach(function () { totalQuizzes++; });
 
         // Initialize SCORM
@@ -259,23 +288,17 @@
             goToPage(parseInt(saved));
         }
 
-        // ------------------------------------------------------------------
-        // Navigation
-        // ------------------------------------------------------------------
         window.goToPage = function (idx) {
             if (idx < 0 || idx >= totalPages) return;
 
-            // Hide current
             var cur = document.getElementById('page-' + currentPage);
             if (cur) cur.style.display = 'none';
 
-            // Show completion on last page + next
             if (idx >= totalPages) {
                 showCompletion();
                 return;
             }
 
-            // Show target
             var target = document.getElementById('page-' + idx);
             if (target) target.style.display = '';
 
@@ -289,7 +312,6 @@
             SCORM.setLocation(String(idx));
             SCORM.commit();
 
-            // Close sidebar on mobile
             document.getElementById('sidebar').classList.remove('open');
         };
 
@@ -312,13 +334,13 @@
         };
 
         function updateNav() {
-            document.getElementById('btnPrev').disabled = currentPage === 0;
-            document.getElementById('btnNext').textContent =
-                currentPage === totalPages - 1 ? 'Завершить ✓' : 'Далее →';
-            document.getElementById('pageIndicator').textContent =
-                (currentPage + 1) + ' / ' + totalPages;
+            var btnPrev = document.getElementById('btnPrev');
+            var btnNext = document.getElementById('btnNext');
+            if (btnPrev) btnPrev.disabled = currentPage === 0;
+            if (btnNext) btnNext.textContent = currentPage === totalPages - 1 ? 'Завершить SC0 ✓' : 'Далее →';
+            var ind = document.getElementById('pageIndicator');
+            if (ind) ind.textContent = (currentPage + 1) + ' / ' + totalPages;
 
-            // Sidebar active
             document.querySelectorAll('.nav-item').forEach(function (el, i) {
                 el.classList.toggle('active', i === currentPage);
                 el.classList.toggle('completed', visitedPages.has(i) && i !== currentPage);
@@ -327,19 +349,23 @@
 
         function updateProgress() {
             var pct = Math.round((visitedPages.size / totalPages) * 100);
-            document.getElementById('progressBar').style.width = pct + '%';
-            document.getElementById('progressPercent').textContent = pct + '%';
+            var pb = document.getElementById('progressBar');
+            var pt = document.getElementById('progressPercent');
+            if (pb) pb.style.width = pct + '%';
+            if (pt) pt.textContent = pct + '%';
 
-            if (pct >= 100) {
-                SCORM.setLessonStatus('completed');
-            } else {
-                SCORM.setLessonStatus('incomplete');
+            if (totalQuizzes === 0) {
+                // Если нет квизов, то считаем пройденным по прочтению 100%
+                if (pct >= 100) {
+                    SCORM.setLessonStatus('completed');
+                    SCORM.setScore(100);
+                } else {
+                    SCORM.setLessonStatus('incomplete');
+                }
             }
         }
 
-        // ------------------------------------------------------------------
         // Quiz logic: MCQ + TrueFalse
-        // ------------------------------------------------------------------
         window.selectOption = function (el) {
             var quizId = el.getAttribute('data-quiz');
             if (quizResults[quizId] !== undefined) return;
@@ -364,9 +390,6 @@
             if (btn) btn.disabled = false;
         };
 
-        // ------------------------------------------------------------------
-        // Fill-in-the-blank
-        // ------------------------------------------------------------------
         window.fillinKeyup = function (event, quizId) {
             if (quizResults[quizId] !== undefined) return;
             var input = document.getElementById('input-' + quizId);
@@ -377,75 +400,36 @@
             }
         };
 
-        // ------------------------------------------------------------------
-        // Ordering — drag & drop
-        // ------------------------------------------------------------------
+        // DragDrop code skipped for brevity, copy pasted basically
         var dragSrcEl = null;
-
-        function handleDragStart(e) {
-            dragSrcEl = this;
-            this.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/html', this.innerHTML);
-        }
-
-        function handleDragOver(e) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            this.classList.add('drag-over');
-            return false;
-        }
-
-        function handleDragLeave() {
-            this.classList.remove('drag-over');
-        }
-
+        function handleDragStart(e) { dragSrcEl = this; this.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/html', this.innerHTML); }
+        function handleDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; this.classList.add('drag-over'); return false; }
+        function handleDragLeave() { this.classList.remove('drag-over'); }
         function handleDrop(e) {
-            e.stopPropagation();
-            e.preventDefault();
-            this.classList.remove('drag-over');
-
+            e.stopPropagation(); e.preventDefault(); this.classList.remove('drag-over');
             if (dragSrcEl !== this) {
-                // Swap elements
-                var parent = this.parentNode;
-                var allItems = Array.from(parent.children);
-                var srcIdx = allItems.indexOf(dragSrcEl);
-                var dstIdx = allItems.indexOf(this);
-
-                if (srcIdx < dstIdx) {
-                    parent.insertBefore(dragSrcEl, this.nextSibling);
-                } else {
-                    parent.insertBefore(dragSrcEl, this);
-                }
+                var parent = this.parentNode; var allItems = Array.from(parent.children);
+                var srcIdx = allItems.indexOf(dragSrcEl); var dstIdx = allItems.indexOf(this);
+                if (srcIdx < dstIdx) parent.insertBefore(dragSrcEl, this.nextSibling);
+                else parent.insertBefore(dragSrcEl, this);
             }
             return false;
         }
-
         function handleDragEnd() {
             this.classList.remove('dragging');
-            document.querySelectorAll('.ordering-item, .matching-item-right').forEach(function (el) {
-                el.classList.remove('drag-over');
-            });
+            document.querySelectorAll('.ordering-item, .matching-item-right').forEach(function (el) { el.classList.remove('drag-over'); });
         }
-
-        // Initialize drag & drop for ordering items
         function initDragDrop() {
             document.querySelectorAll('.ordering-item, .matching-item-right').forEach(function (item) {
-                item.addEventListener('dragstart', handleDragStart);
-                item.addEventListener('dragover', handleDragOver);
-                item.addEventListener('dragleave', handleDragLeave);
-                item.addEventListener('drop', handleDrop);
+                item.addEventListener('dragstart', handleDragStart); item.addEventListener('dragover', handleDragOver);
+                item.addEventListener('dragleave', handleDragLeave); item.addEventListener('drop', handleDrop);
                 item.addEventListener('dragend', handleDragEnd);
             });
         }
         initDragDrop();
 
-        // ------------------------------------------------------------------
-        // Submit handler (all types)
-        // ------------------------------------------------------------------
         window.submitQuiz = function (quizId, type) {
             if (quizResults[quizId] !== undefined) return;
-
             var block = document.getElementById(quizId);
             var isCorrect = false;
 
@@ -453,137 +437,101 @@
                 var selected = block.querySelector('.quiz-option.selected');
                 if (!selected) return;
                 isCorrect = selected.getAttribute('data-correct') === 'true';
-
                 block.querySelectorAll('.quiz-option').forEach(function (o) {
                     o.classList.add('disabled');
-                    if (o.getAttribute('data-correct') === 'true') {
-                        o.classList.add('correct');
-                    } else if (o === selected && !isCorrect) {
-                        o.classList.add('incorrect');
-                    }
+                    if (o.getAttribute('data-correct') === 'true') o.classList.add('correct');
+                    else if (o === selected && !isCorrect) o.classList.add('incorrect');
                 });
-
             } else if (type === 'truefalse') {
                 var selected = block.querySelector('.tf-btn.selected');
                 if (!selected) return;
                 isCorrect = selected.getAttribute('data-correct') === 'true';
-
                 block.querySelectorAll('.tf-btn').forEach(function (b) {
                     b.classList.add('disabled');
-                    if (b.getAttribute('data-correct') === 'true') {
-                        b.classList.add('correct');
-                    } else if (b === selected && !isCorrect) {
-                        b.classList.add('incorrect');
-                    }
+                    if (b.getAttribute('data-correct') === 'true') b.classList.add('correct');
+                    else if (b === selected && !isCorrect) b.classList.add('incorrect');
                 });
-
             } else if (type === 'fillin') {
                 var input = document.getElementById('input-' + quizId);
                 var userAnswer = input.value.trim().toLowerCase();
                 var correctAnswer = input.getAttribute('data-correct').toLowerCase();
                 var alternatives = input.getAttribute('data-alternatives');
-
                 var acceptedAnswers = [correctAnswer];
-                if (alternatives) {
-                    alternatives.split('|||').forEach(function (a) {
-                        if (a.trim()) acceptedAnswers.push(a.trim().toLowerCase());
-                    });
-                }
-
+                if (alternatives) alternatives.split('|||').forEach(function (a) { if (a.trim()) acceptedAnswers.push(a.trim().toLowerCase()); });
                 isCorrect = acceptedAnswers.indexOf(userAnswer) !== -1;
-                input.disabled = true;
-                input.classList.add(isCorrect ? 'correct' : 'incorrect');
-
+                input.disabled = true; input.classList.add(isCorrect ? 'correct' : 'incorrect');
             } else if (type === 'matching') {
-                var fb = document.getElementById('fb-' + quizId);
-                var pairsData = JSON.parse(fb.getAttribute('data-pairs'));
-                var rightItems = block.querySelectorAll('.matching-item-right');
-                var allCorrect = true;
-
+                var fb = document.getElementById('fb-' + quizId); var pairsData = JSON.parse(fb.getAttribute('data-pairs'));
+                var rightItems = block.querySelectorAll('.matching-item-right'); var allCorrect = true;
                 rightItems.forEach(function (item, idx) {
-                    var currentText = item.textContent.trim();
-                    var expectedText = pairsData[idx].right.trim();
-                    if (currentText !== expectedText) {
-                        allCorrect = false;
-                        item.classList.add('incorrect');
-                    } else {
-                        item.classList.add('correct');
-                    }
-                    item.setAttribute('draggable', 'false');
-                    item.classList.add('disabled');
+                    if (item.textContent.trim() !== pairsData[idx].right.trim()) { allCorrect = false; item.classList.add('incorrect'); }
+                    else { item.classList.add('correct'); }
+                    item.setAttribute('draggable', 'false'); item.classList.add('disabled');
                 });
-
                 isCorrect = allCorrect;
-
             } else if (type === 'ordering') {
-                var fb = document.getElementById('fb-' + quizId);
-                var correctOrder = JSON.parse(fb.getAttribute('data-correct-order'));
-                var items = block.querySelectorAll('.ordering-item');
-                var allCorrect = true;
-
+                var fb = document.getElementById('fb-' + quizId); var correctOrder = JSON.parse(fb.getAttribute('data-correct-order'));
+                var items = block.querySelectorAll('.ordering-item'); var allCorrect = true;
                 items.forEach(function (item, idx) {
-                    var itemText = item.querySelector('.ordering-text').textContent.trim();
-                    if (itemText !== correctOrder[idx].trim()) {
-                        allCorrect = false;
-                        item.classList.add('incorrect');
-                    } else {
-                        item.classList.add('correct');
-                    }
-                    item.setAttribute('draggable', 'false');
-                    item.classList.add('disabled');
+                    if (item.querySelector('.ordering-text').textContent.trim() !== correctOrder[idx].trim()) { allCorrect = false; item.classList.add('incorrect'); }
+                    else { item.classList.add('correct'); }
+                    item.setAttribute('draggable', 'false'); item.classList.add('disabled');
                 });
-
                 isCorrect = allCorrect;
             }
 
             quizResults[quizId] = isCorrect;
             if (isCorrect) correctQuizzes++;
 
-            // Feedback
             var fb = document.getElementById('fb-' + quizId);
             if (fb) {
                 fb.textContent = isCorrect ? fb.getAttribute('data-correct') : fb.getAttribute('data-incorrect');
                 fb.className = 'quiz-feedback show ' + (isCorrect ? 'correct' : 'incorrect');
             }
 
-            // Disable submit
             var btn = document.getElementById('btn-' + quizId);
             if (btn) btn.disabled = true;
 
-            // Update SCORM score
             if (totalQuizzes > 0) {
                 var score = Math.round((correctQuizzes / totalQuizzes) * 100);
                 SCORM.setScore(score);
+                // Pass status based on mastery score
+                if (Object.keys(quizResults).length === totalQuizzes) {
+                    if (score >= passingScore) SCORM.setLessonStatus('passed');
+                    else SCORM.setLessonStatus('failed');
+                }
             }
             SCORM.commit();
         };
 
-        // ------------------------------------------------------------------
-        // Completion
-        // ------------------------------------------------------------------
-        function showCompletion() {
-            document.querySelectorAll('.page-container').forEach(function (p) {
-                p.style.display = 'none';
-            });
+        window.showCompletion = function () {
+            var pagesArr = document.querySelectorAll('.page-container');
+            pagesArr.forEach(function (el) { el.style.display = 'none'; });
 
             var score = totalQuizzes > 0 ? Math.round((correctQuizzes / totalQuizzes) * 100) : 100;
-            document.getElementById('finalScore').textContent = score + '%';
-            document.getElementById('completionScreen').classList.add('show');
+            var finalScoreEl = document.getElementById('finalScore');
+            if (finalScoreEl) finalScoreEl.textContent = score + '%';
+
+            var compScreen = document.getElementById('completionScreen');
+            if (compScreen) compScreen.classList.add('show');
 
             SCORM.setScore(score);
-            SCORM.setLessonStatus('completed');
+            if (totalQuizzes > 0) {
+                if (score >= passingScore) SCORM.setLessonStatus('passed');
+                else SCORM.setLessonStatus('failed');
+            } else {
+                SCORM.setLessonStatus('completed');
+            }
             SCORM.commit();
         }
 
-        // Cleanup on unload
         window.addEventListener('beforeunload', function () {
             SCORM.finish();
         });
 
-        // Initial state
         updateNav();
         updateProgress();
-    }) ();
+        }) ();
     </script>
 </body>
 
